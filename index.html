@@ -75,7 +75,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 /* Onglets */
 .tabs{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--surface);border-top:1px solid var(--line);
   display:flex;padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px))}
-.tabs button{flex:1;background:none;border:0;padding:10px 4px;border-radius:8px;font-weight:600;color:var(--muted);cursor:pointer}
+.tabs button{flex:1;min-width:0;background:none;border:0;padding:10px 2px;border-radius:8px;font-weight:600;font-size:13.5px;color:var(--muted);cursor:pointer}
 .tabs button[aria-current="page"]{color:var(--accent);background:var(--accent-soft)}
 
 /* Contenu */
@@ -143,6 +143,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
+const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c==='x'?r:(r&3|8)).toString(16); }));
@@ -166,7 +167,7 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null
+  sales: null, summary: null, range: 'today', sheet: null, team: null
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
@@ -182,7 +183,7 @@ function drawLogin(msg) {
   $('#app').innerHTML = `
     <form class="login" id="login-form" autocomplete="on">
       <div class="brand">Bara Gestion<small>Stock, ventes et dépenses de votre boutique</small></div>
-      <label>Adresse e-mail<input id="email" type="email" autocomplete="username" required></label>
+      <label>Identifiant ou adresse e-mail<input id="email" type="text" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username" required></label>
       <label>Mot de passe<input id="password" type="password" autocomplete="current-password" required></label>
       ${msg ? `<div class="banner bad" role="alert">${esc(msg)}</div>` : ''}
       <button class="btn" id="login-btn" type="submit">Se connecter</button>
@@ -190,7 +191,9 @@ function drawLogin(msg) {
   $('#login-form').addEventListener('submit', async ev => {
     ev.preventDefault();
     const b = $('#login-btn'); b.disabled = true; b.textContent = 'Connexion…';
-    const { data, error } = await sb.auth.signInWithPassword({ email: $('#email').value.trim(), password: $('#password').value });
+    let login = $('#email').value.trim().toLowerCase();
+    if (!login.includes('@')) login += '@' + LOGIN_DOMAIN;   // identifiant court des employés
+    const { data, error } = await sb.auth.signInWithPassword({ email: login, password: $('#password').value });
     if (error) return drawLogin(cleanErr(error));
     S.user = data.user; await loadContext();
   });
@@ -220,7 +223,7 @@ async function selectShop(id) {
   S.shop = { id, name: m.shops.name, type: m.shops.shop_type, who: m.display_name };
   S.role = m.role;
   storage.setItem('bg_shop', id);
-  S.cart = new Map(); S.ref = uuid(); S.sales = null; S.summary = null; S.tab = 'sale';
+  S.cart = new Map(); S.ref = uuid(); S.sales = null; S.summary = null; S.team = null; S.tab = 'sale';
   await Promise.all([loadProducts(), loadSub()]);
   draw();
 }
@@ -263,6 +266,7 @@ function banner() {
 function draw() {
   const tabs = [['sale','Vente'], ['products','Produits'], ['history','Historique']];
   if (isManager()) tabs.push(['report','Bilan']);
+  if (S.role === 'owner') tabs.push(['team','Équipe']);
   const multi = S.memberships.length > 1;
   $('#app').innerHTML = `
     <header class="top">
@@ -282,7 +286,7 @@ function draw() {
   $('#logout').onclick = () => sb.auth.signOut();
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; draw(); });
-  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport })[S.tab]();
+  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam })[S.tab]();
 }
 
 /* ===== Onglet Vente ===== */
@@ -538,6 +542,117 @@ async function viewReport() {
     if (error) return toast(cleanErr(error), true);
     toast('Dépense enregistrée.'); S.summary = null; viewReport();
   };
+}
+
+/* ===== Onglet Équipe (propriétaire uniquement) =====
+   Les comptes sont créés par la fonction sécurisée « manage-team » : la clé secrète
+   de Supabase ne quitte jamais le serveur. */
+async function callTeam(body) {
+  const { data, error } = await sb.functions.invoke('manage-team', { body: { shop_id: S.shop.id, ...body } });
+  if (error) {
+    let msg = cleanErr(error);
+    try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) {}
+    throw new Error(msg);
+  }
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
+function randomPassword() {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // sans caractères ambigus (0/O, 1/l/I)
+  const a = new Uint32Array(10); crypto.getRandomValues(a);
+  return [...a].map(n => chars[n % chars.length]).join('');
+}
+
+async function viewTeam() {
+  $('#view').innerHTML = '<p class="empty">Chargement…</p>';
+  try {
+    if (!S.team) S.team = (await callTeam({ action: 'list_members' })).members;
+  } catch (e) { $('#view').innerHTML = ''; return toast(e.message, true); }
+  $('#view').innerHTML = `
+    <section class="card stack">
+      <div class="row"><h2 style="flex:1 1 auto">Équipe (${S.team.length})</h2>
+        <button class="btn small" id="addm" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Ajouter</button></div>
+      <p class="muted" style="margin:0;font-size:13px">Chaque employé se connecte avec son identifiant et son mot de passe. Le vendeur ne voit ni les prix d'achat ni le bilan.</p>
+      <div class="plist">${S.team.map(m => `
+        <div class="prod" style="align-items:flex-start">
+          <div style="min-width:0">
+            <div class="nm">${esc(m.display_name)}</div>
+            <div class="sub">${esc(ROLES[m.role])} · identifiant : <b>${esc(m.login)}</b></div>
+            <div style="margin-top:4px">${m.active ? '<span class="tag">Actif</span>' : '<span class="tag bad">Désactivé</span>'}</div>
+            ${m.role !== 'owner' ? `<div class="seg" style="margin-top:8px">
+              <button class="btn ghost small" data-pw="${esc(m.user_id)}" ${canWrite() ? '' : 'disabled'}>Nouveau mot de passe</button>
+              <button class="btn ghost small" data-act="${esc(m.user_id)}" data-to="${m.active ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${m.active ? 'Désactiver' : 'Réactiver'}</button></div>` : ''}
+          </div>
+        </div>`).join('')}</div>
+    </section>`;
+  $('#addm').onclick = openAddMember;
+  document.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => openResetPassword(b.dataset.pw));
+  document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const { error } = await sb.rpc('set_member_active', { p_shop: S.shop.id, p_user: b.dataset.act, p_active: b.dataset.to === '1' });
+    if (error) { b.disabled = false; return toast(cleanErr(error), true); }
+    toast(b.dataset.to === '1' ? 'Employé réactivé.' : 'Employé désactivé : il ne peut plus se connecter.');
+    S.team = null; viewTeam();
+  });
+}
+
+function credentialsSheet(title, login, password) {
+  const text = `Bara Gestion\nIdentifiant : ${login}\nMot de passe : ${password}`;
+  $('#sheet-host').innerHTML = `<div class="sheet-bg"><div class="sheet" role="dialog" aria-label="${esc(title)}">
+    <h2>${esc(title)}</h2>
+    <div class="card"><div>Identifiant : <b>${esc(login)}</b></div><div>Mot de passe : <b>${esc(password)}</b></div></div>
+    <p class="muted" style="margin:0">Notez ces informations et donnez-les à l'employé. Le mot de passe ne sera plus affiché ensuite.</p>
+    <div class="row"><button class="btn" id="copyc">Copier</button><button class="btn ghost" id="closec">Fermer</button></div></div></div>`;
+  $('#copyc').onclick = async () => {
+    try { await navigator.clipboard.writeText(text); toast('Copié.'); } catch (e) { toast('Copie impossible : recopiez à la main.', true); }
+  };
+  $('#closec').onclick = () => { closeSheet(); S.team = null; viewTeam(); };
+}
+
+function openAddMember() {
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Ajouter un employé">
+    <h2>Ajouter un employé</h2>
+    <label>Nom affiché<input id="m-name" maxlength="80" required autocomplete="off"></label>
+    <label>Rôle<select id="m-role"><option value="seller">Vendeur (ventes seulement)</option><option value="manager">Gérant (produits, stock, bilan)</option></select></label>
+    <label>Identifiant de connexion (lettres minuscules et chiffres, sans espace)<input id="m-login" maxlength="40" required autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="ex. moussa.kabore"></label>
+    <label>Mot de passe de départ<div class="row" style="flex-wrap:nowrap"><input id="m-pass" required minlength="8" maxlength="72" autocomplete="off" style="flex:1 1 auto"><button class="btn ghost small" type="button" id="m-gen" style="flex:0 0 auto">Générer</button></div></label>
+    <div class="row"><button class="btn" type="submit">Créer le compte</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#m-gen').onclick = () => { $('#m-pass').value = randomPassword(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = 'Création…';
+    const pass = $('#m-pass').value;
+    try {
+      const r = await callTeam({ action: 'create_member', login: $('#m-login').value, password: pass,
+        display_name: $('#m-name').value, role: $('#m-role').value });
+      credentialsSheet('Compte créé', r.login, pass);
+    } catch (e) { btn.disabled = false; btn.textContent = 'Créer le compte'; toast(e.message, true); }
+  };
+  $('#m-name').focus();
+}
+
+function openResetPassword(userId) {
+  const m = S.team.find(x => x.user_id === userId); if (!m) return;
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Nouveau mot de passe">
+    <h2>Nouveau mot de passe</h2><p class="muted" style="margin:0">Pour ${esc(m.display_name)} (${esc(m.login)}).</p>
+    <label>Nouveau mot de passe<div class="row" style="flex-wrap:nowrap"><input id="m-pass" required minlength="8" maxlength="72" autocomplete="off" style="flex:1 1 auto"><button class="btn ghost small" type="button" id="m-gen" style="flex:0 0 auto">Générer</button></div></label>
+    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#m-gen').onclick = () => { $('#m-pass').value = randomPassword(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const pass = $('#m-pass').value;
+    try {
+      await callTeam({ action: 'reset_password', user_id: userId, password: pass });
+      credentialsSheet('Mot de passe changé', m.login, pass);
+    } catch (e) { btn.disabled = false; toast(e.message, true); }
+  };
+  $('#m-pass').focus();
 }
 
 boot().catch(e => fatal(e));
