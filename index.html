@@ -223,7 +223,7 @@ async function selectShop(id) {
   S.shop = { id, name: m.shops.name, type: m.shops.shop_type, who: m.display_name };
   S.role = m.role;
   storage.setItem('bg_shop', id);
-  S.cart = new Map(); S.ref = uuid(); S.sales = null; S.summary = null; S.team = null; S.tab = 'sale';
+  S.cart = new Map(); S.ref = uuid(); S.sales = null; S.summary = null; S.team = null; S.names = null; S.tab = 'sale';
   await Promise.all([loadProducts(), loadSub()]);
   draw();
 }
@@ -468,15 +468,22 @@ async function viewHistory() {
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
   if (!S.sales) {
     const { data, error } = await sb.from('sales')
-      .select('id,created_at,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))')
+      .select('id,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))')
       .eq('shop_id', S.shop.id).order('created_at', { ascending: false }).limit(50);
     if (error) { $('#view').innerHTML = ''; return toast(cleanErr(error), true); }
     S.sales = data || [];
+  }
+  // Propriétaire / gérant : noms des vendeurs (la base ne les laisse lire qu'à eux).
+  if (isManager() && !S.names) {
+    const { data: mem } = await sb.from('shop_members').select('user_id, display_name').eq('shop_id', S.shop.id);
+    S.names = {};
+    (mem || []).forEach(m => { S.names[m.user_id] = m.display_name; });
   }
   $('#view').innerHTML = `<section class="stack"><h2>${isManager() ? 'Dernières ventes' : 'Mes dernières ventes'}</h2>
     ${S.sales.map(s => `<article class="sale ${s.status === 'cancelled' ? 'cancelled' : ''}">
       <div class="row" style="align-items:baseline"><b class="num">${money(s.total)}</b>
         <span class="muted" style="text-align:right">${dt(s.created_at)} · ${esc(PAY[s.payment_method])}</span></div>
+      ${isManager() ? `<div class="muted">Vendu par ${esc((S.names && S.names[s.created_by]) || 'compte supprimé')}</div>` : ''}
       <ul>${(s.sale_items || []).map(i => `<li>${qty(i.quantity)} ${esc(UNITS[i.products?.unit] || '')} ${esc(i.products?.name)} · ${money(i.line_total)}</li>`).join('')}</ul>
       <div>${s.status === 'cancelled' ? `<span class="tag bad">Annulée</span> <span class="muted">${esc(s.cancel_reason)}</span>` : ''}
         ${s.status !== 'cancelled' && s.paid < s.total ? `<span class="tag warn">Crédit : reste ${money(s.total - s.paid)}</span> <span class="muted">${esc(s.customer_name)}</span>` : ''}</div>
@@ -593,7 +600,7 @@ async function viewTeam() {
     const { error } = await sb.rpc('set_member_active', { p_shop: S.shop.id, p_user: b.dataset.act, p_active: b.dataset.to === '1' });
     if (error) { b.disabled = false; return toast(cleanErr(error), true); }
     toast(b.dataset.to === '1' ? 'Employé réactivé.' : 'Employé désactivé : il ne peut plus se connecter.');
-    S.team = null; viewTeam();
+    S.team = null; S.names = null; viewTeam();
   });
 }
 
@@ -607,7 +614,7 @@ function credentialsSheet(title, login, password) {
   $('#copyc').onclick = async () => {
     try { await navigator.clipboard.writeText(text); toast('Copié.'); } catch (e) { toast('Copie impossible : recopiez à la main.', true); }
   };
-  $('#closec').onclick = () => { closeSheet(); S.team = null; viewTeam(); };
+  $('#closec').onclick = () => { closeSheet(); S.team = null; S.names = null; viewTeam(); };
 }
 
 function openAddMember() {
