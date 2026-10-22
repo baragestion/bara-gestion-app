@@ -154,6 +154,7 @@ const cleanErr = e => {
   return m;
 };
 function toast(msg, err) {
+  if (err && /Accès refusé/.test(msg || '')) setTimeout(checkSession, 0);
   const el = document.createElement('div');
   el.className = 'toast' + (err ? ' err' : '');
   el.setAttribute('role', 'status');
@@ -167,7 +168,7 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null
+  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
@@ -176,7 +177,27 @@ const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status
 async function boot() {
   const { data } = await sb.auth.getSession();
   if (data.session) { S.user = data.session.user; await loadContext(); } else drawLogin();
-  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; drawLogin(); } });
+  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; const m = S.kick; S.kick = null; drawLogin(m); } });
+  startGuard();
+}
+
+/* Session fermée à distance (nouveau mot de passe, connexion sur un autre appareil) :
+   on le détecte vite et on renvoie vers l'écran de connexion. */
+async function checkSession() {
+  if (!S.user || S.checking) return;
+  S.checking = true;
+  try {
+    const { data, error } = await sb.rpc('session_valid');
+    if (!error && data === false) {
+      S.kick = 'Votre connexion a été fermée (nouveau mot de passe, ou connexion sur un autre appareil). Reconnectez-vous.';
+      await sb.auth.signOut({ scope: 'local' });
+    }
+  } catch (e) { /* hors ligne : on réessaiera */ }
+  S.checking = false;
+}
+function startGuard() {
+  setInterval(checkSession, 30000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkSession(); });
 }
 
 function drawLogin(msg) {
@@ -195,7 +216,9 @@ function drawLogin(msg) {
     if (!login.includes('@')) login += '@' + LOGIN_DOMAIN;   // identifiant court des employés
     const { data, error } = await sb.auth.signInWithPassword({ email: login, password: $('#password').value });
     if (error) return drawLogin(cleanErr(error));
-    S.user = data.user; await loadContext();
+    S.user = data.user;
+    try { await sb.rpc('claim_single_session'); } catch (e) {}   // vendeurs et gérants : un seul appareil à la fois
+    await loadContext();
   });
 }
 
@@ -256,6 +279,12 @@ function fatal(e) {
 /* ===== Structure générale ===== */
 function banner() {
   const s = S.sub || {};
+  // Les dates de l'abonnement ne concernent que le propriétaire. Les employés voient seulement
+  // un message si la boutique ne peut plus vendre.
+  if (S.role !== 'owner') {
+    return (s.status === 'read_only' || s.status === 'suspended')
+      ? `<div class="banner bad">Les ventes sont bloquées pour le moment. Contactez le propriétaire de la boutique.</div>` : '';
+  }
   if (s.status === 'trial') return `<div class="banner ok">Essai gratuit : ${esc(s.days_left)} jour(s) restant(s).</div>`;
   if (s.status === 'grace') return `<div class="banner">Abonnement expiré. Payez avant la fin du délai pour ne pas passer en lecture seule.</div>`;
   if (s.status === 'read_only') return `<div class="banner bad">Abonnement expiré : lecture seule. Les ventes et le stock sont bloqués.</div>`;
