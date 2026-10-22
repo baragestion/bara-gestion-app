@@ -167,7 +167,7 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null, team: null
+  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
@@ -202,7 +202,7 @@ function drawLogin(msg) {
 async function loadContext() {
   $('#app').innerHTML = '<p class="empty">Chargement…</p>';
   const { data, error } = await sb.from('shop_members')
-    .select('shop_id, role, display_name, shops(name, shop_type)')
+    .select('shop_id, role, display_name, shops(name, shop_type, phone, address, invoice_footer)')
     .eq('user_id', S.user.id).eq('active', true);
   if (error) return fatal(error);
   S.memberships = data || [];
@@ -220,10 +220,11 @@ async function loadContext() {
 
 async function selectShop(id) {
   const m = S.memberships.find(x => x.shop_id === id);
-  S.shop = { id, name: m.shops.name, type: m.shops.shop_type, who: m.display_name };
+  S.shop = { id, name: m.shops.name, type: m.shops.shop_type, who: m.display_name,
+    phone: m.shops.phone || '', address: m.shops.address || '', footer: m.shops.invoice_footer || '' };
   S.role = m.role;
   storage.setItem('bg_shop', id);
-  S.cart = new Map(); S.ref = uuid(); S.sales = null; S.summary = null; S.team = null; S.names = null; S.tab = 'sale';
+  S.cart = new Map(); S.ref = uuid(); S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
   await Promise.all([loadProducts(), loadSub()]);
   draw();
 }
@@ -298,6 +299,8 @@ function cartTotal() {
 
 function viewSale() {
   $('#view').innerHTML = `
+    ${S.last ? `<section class="card"><div class="row" style="align-items:center"><div>Vente enregistrée : <b class="num">${esc(money(S.last.total))}</b></div>
+      <button class="btn small" id="last-inv" style="flex:0 0 auto">Facture</button><button class="btn ghost small" id="last-x" style="flex:0 0 auto">OK</button></div></section>` : ''}
     <section class="card stack">
       <h2>Nouvelle vente</h2>
       <label>Chercher un produit ou scanner un code<input id="q" type="search" placeholder="Nom, ou code-barres puis Entrée" value="${esc(S.q)}" autocomplete="off"></label>
@@ -314,6 +317,8 @@ function viewSale() {
     if (hit) { addToCart(hit.id); S.q = ''; q.value = ''; drawProducts(); }
     else toast('Aucun produit avec ce code.', true);
   };
+  const li = $('#last-inv'); if (li) li.onclick = () => openInvoice(S.last.id);
+  const lx = $('#last-x'); if (lx) lx.onclick = () => { S.last = null; viewSale(); };
   drawProducts(); drawCart();
 }
 
@@ -374,13 +379,13 @@ async function submitSale() {
   const paidRaw = $('#paid').value.trim();
   const paid = paidRaw === '' ? total : Math.round(Number(paidRaw));
   const items = [...S.cart].map(([product_id, quantity]) => ({ product_id, quantity }));
-  const { error } = await sb.rpc('create_sale', {
+  const { data: newSale, error } = await sb.rpc('create_sale', {
     p_shop: S.shop.id, p_items: items, p_paid: paid,
     p_payment_method: $('#pay').value, p_customer: $('#cust').value.trim() || null, p_client_ref: S.ref
   });
   S.busy = false;
   if (error) { toast(cleanErr(error), true); return drawCart(); }
-  S.cart.clear(); S.ref = uuid(); S.sales = null; S.summary = null;
+  S.cart.clear(); S.ref = uuid(); S.sales = null; S.summary = null; S.last = newSale ? { id: newSale, total } : null;
   toast('Vente enregistrée : ' + money(total));
   await loadProducts();
   viewSale();
@@ -464,32 +469,29 @@ function openSheet(kind, pid) {
 function closeSheet() { $('#sheet-host').innerHTML = ''; }
 
 /* ===== Onglet Historique ===== */
+const SALE_COLS = 'id,invoice_no,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
 async function viewHistory() {
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
   if (!S.sales) {
     const { data, error } = await sb.from('sales')
-      .select('id,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))')
+      .select(SALE_COLS)
       .eq('shop_id', S.shop.id).order('created_at', { ascending: false }).limit(50);
     if (error) { $('#view').innerHTML = ''; return toast(cleanErr(error), true); }
     S.sales = data || [];
   }
-  // Propriétaire / gérant : noms des vendeurs (la base ne les laisse lire qu'à eux).
-  if (isManager() && !S.names) {
-    const { data: mem } = await sb.from('shop_members').select('user_id, display_name').eq('shop_id', S.shop.id);
-    S.names = {};
-    (mem || []).forEach(m => { S.names[m.user_id] = m.display_name; });
-  }
+  await ensureNames();   // propriétaire / gérant : noms des vendeurs (la base ne les leur donne qu'à eux)
   $('#view').innerHTML = `<section class="stack"><h2>${isManager() ? 'Dernières ventes' : 'Mes dernières ventes'}</h2>
     ${S.sales.map(s => `<article class="sale ${s.status === 'cancelled' ? 'cancelled' : ''}">
-      <div class="row" style="align-items:baseline"><b class="num">${money(s.total)}</b>
+      <div class="row" style="align-items:baseline"><b class="num">${money(s.total)}</b><span class="muted" style="flex:0 0 auto">${esc(invNo(s.invoice_no))}</span>
         <span class="muted" style="text-align:right">${dt(s.created_at)} · ${esc(PAY[s.payment_method])}</span></div>
       ${isManager() ? `<div class="muted">Vendu par ${esc((S.names && S.names[s.created_by]) || 'compte supprimé')}</div>` : ''}
       <ul>${(s.sale_items || []).map(i => `<li>${qty(i.quantity)} ${esc(UNITS[i.products?.unit] || '')} ${esc(i.products?.name)} · ${money(i.line_total)}</li>`).join('')}</ul>
       <div>${s.status === 'cancelled' ? `<span class="tag bad">Annulée</span> <span class="muted">${esc(s.cancel_reason)}</span>` : ''}
         ${s.status !== 'cancelled' && s.paid < s.total ? `<span class="tag warn">Crédit : reste ${money(s.total - s.paid)}</span> <span class="muted">${esc(s.customer_name)}</span>` : ''}</div>
-      ${isManager() && s.status !== 'cancelled' ? `<div><button class="btn ghost small" data-cancel="${esc(s.id)}" ${canWrite() ? '' : 'disabled'}>Annuler cette vente</button></div>` : ''}
+      ${s.status !== 'cancelled' ? `<div class="seg"><button class="btn ghost small" data-inv="${esc(s.id)}">Facture</button>${isManager() ? `<button class="btn ghost small" data-cancel="${esc(s.id)}" ${canWrite() ? '' : 'disabled'}>Annuler cette vente</button>` : ''}</div>` : ''}
     </article>`).join('') || '<p class="empty">Aucune vente pour le moment.</p>'}</section>`;
   document.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => cancelDialog(b.dataset.cancel));
+  document.querySelectorAll('[data-inv]').forEach(b => b.onclick = () => openInvoice(S.sales.find(x => x.id === b.dataset.inv)));
 }
 
 function cancelDialog(id) {
@@ -578,6 +580,16 @@ async function viewTeam() {
   } catch (e) { $('#view').innerHTML = ''; return toast(e.message, true); }
   $('#view').innerHTML = `
     <section class="card stack">
+      <div class="row"><h2 style="flex:1 1 auto">Fiche de la boutique</h2>
+        <button class="btn ghost small" id="editshop" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Modifier</button></div>
+      <div class="muted" style="font-size:13.5px;display:grid;gap:2px">
+        <div><b style="color:var(--fg)">${esc(S.shop.name)}</b></div>
+        <div>${S.shop.address ? esc(S.shop.address) : 'Adresse : non renseignée'}</div>
+        <div>${S.shop.phone ? 'Tél. ' + esc(S.shop.phone) : 'Téléphone : non renseigné'}</div>
+        <div>${S.shop.footer ? esc(S.shop.footer) : 'Phrase de bas de page : non renseignée'}</div></div>
+      <p class="muted" style="margin:0;font-size:12.5px">Imprimée sur chaque facture.</p>
+    </section>
+    <section class="card stack">
       <div class="row"><h2 style="flex:1 1 auto">Équipe (${S.team.length})</h2>
         <button class="btn small" id="addm" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Ajouter</button></div>
       <p class="muted" style="margin:0;font-size:13px">Chaque employé se connecte avec son identifiant et son mot de passe. Le vendeur ne voit ni les prix d'achat ni le bilan.</p>
@@ -594,6 +606,7 @@ async function viewTeam() {
         </div>`).join('')}</div>
     </section>`;
   $('#addm').onclick = openAddMember;
+  $('#editshop').onclick = openShopProfile;
   document.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => openResetPassword(b.dataset.pw));
   document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
     b.disabled = true;
@@ -604,12 +617,13 @@ async function viewTeam() {
   });
 }
 
-function credentialsSheet(title, login, password) {
+function credentialsSheet(title, login, password, note) {
   const text = `Bara Gestion\nIdentifiant : ${login}\nMot de passe : ${password}`;
   $('#sheet-host').innerHTML = `<div class="sheet-bg"><div class="sheet" role="dialog" aria-label="${esc(title)}">
     <h2>${esc(title)}</h2>
     <div class="card"><div>Identifiant : <b>${esc(login)}</b></div><div>Mot de passe : <b>${esc(password)}</b></div></div>
     <p class="muted" style="margin:0">Notez ces informations et donnez-les à l'employé. Le mot de passe ne sera plus affiché ensuite.</p>
+    ${note ? `<div class="banner ${note.warn ? '' : 'ok'}">${esc(note.text)}</div>` : ''}
     <div class="row"><button class="btn" id="copyc">Copier</button><button class="btn ghost" id="closec">Fermer</button></div></div></div>`;
   $('#copyc').onclick = async () => {
     try { await navigator.clipboard.writeText(text); toast('Copié.'); } catch (e) { toast('Copie impossible : recopiez à la main.', true); }
@@ -655,11 +669,277 @@ function openResetPassword(userId) {
     const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
     const pass = $('#m-pass').value;
     try {
-      await callTeam({ action: 'reset_password', user_id: userId, password: pass });
-      credentialsSheet('Mot de passe changé', m.login, pass);
+      const r = await callTeam({ action: 'reset_password', user_id: userId, password: pass });
+      credentialsSheet('Mot de passe changé', m.login, pass, r && r.sessions_closed === false
+        ? { warn: true, text: "Attention : ses connexions déjà ouvertes n'ont pas pu être fermées. Pour le bloquer tout de suite, utilisez « Désactiver »." }
+        : { text: 'Ses connexions ouvertes ont été fermées : il devra se reconnecter avec ce nouveau mot de passe.' });
     } catch (e) { btn.disabled = false; toast(e.message, true); }
   };
   $('#m-pass').focus();
+}
+
+/* ===== PDF:begin ===== */
+/* Petit générateur de PDF (sans bibliothèque externe) : polices standard Helvetica,
+   encodage WinAnsi (accents français compris). Les largeurs de lettres sont en millièmes d'em. */
+const HW = { r: [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584,761,556,0,222,556,333,1000,556,556,333,1000,667,333,1000,0,611,0,0,222,222,333,333,350,556,1000,333,1000,500,333,944,0,500,667,278,333,556,556,556,556,260,556,333,737,370,556,584,333,737,333,400,584,333,333,333,556,537,278,333,333,365,556,834,834,834,611,667,667,667,667,667,667,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,500,556,556,556,556,278,278,278,278,556,556,556,556,556,556,556,584,611,556,556,556,556,500,556,500], b: [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584,761,556,0,278,556,500,1000,556,556,333,1000,667,333,1000,0,611,0,0,278,278,500,500,350,556,1000,333,1000,556,333,944,0,500,667,278,333,556,556,556,556,280,556,333,737,370,556,584,333,737,333,400,584,333,333,333,611,556,278,333,333,365,556,834,834,834,611,722,722,722,722,722,722,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,556,556,556,556,556,278,278,278,278,611,611,611,611,611,611,611,584,611,611,611,611,611,556,611,556] };
+const CP1252 = { 0x20AC:0x80, 0x201A:0x82, 0x0192:0x83, 0x201E:0x84, 0x2026:0x85, 0x2020:0x86, 0x2021:0x87, 0x02C6:0x88,
+  0x2030:0x89, 0x0160:0x8A, 0x2039:0x8B, 0x0152:0x8C, 0x017D:0x8E, 0x2018:0x91, 0x2019:0x92, 0x201C:0x93, 0x201D:0x94,
+  0x2022:0x95, 0x2013:0x96, 0x2014:0x97, 0x02DC:0x98, 0x2122:0x99, 0x0161:0x9A, 0x203A:0x9B, 0x0153:0x9C, 0x017E:0x9E, 0x0178:0x9F };
+
+function pdfBytes(str) {
+  const out = [];
+  for (const ch of String(str ?? '').normalize('NFC').replace(/[   ]/g, ' ')) {
+    const c = ch.codePointAt(0);
+    if (c === 9 || c === 10 || c === 13) out.push(32);
+    else if (c >= 32 && c <= 126) out.push(c);
+    else if (c >= 160 && c <= 255) out.push(c);
+    else if (CP1252[c]) out.push(CP1252[c]);
+    else out.push(63);                      // caractère non géré : « ? »
+  }
+  return out;
+}
+function pdfStr(bytes) {
+  return bytes.map(b => (b === 40 || b === 41 || b === 92) ? '\\' + String.fromCharCode(b) : String.fromCharCode(b)).join('');
+}
+function pdfWidth(str, bold, size) {
+  let w = 0; const t = bold ? HW.b : HW.r;
+  for (const b of pdfBytes(str)) w += t[b - 32] || 0;
+  return w * size / 1000;
+}
+function pdfWrap(str, bold, size, maxW) {
+  const lines = []; let cur = '';
+  for (let w of String(str ?? '').split(/\s+/).filter(Boolean)) {
+    while (pdfWidth(w, bold, size) > maxW && w.length > 1) {          // mot plus long que la ligne : on le coupe
+      let i = w.length - 1;
+      while (i > 1 && pdfWidth(w.slice(0, i), bold, size) > maxW) i--;
+      if (cur) { lines.push(cur); cur = ''; }
+      lines.push(w.slice(0, i)); w = w.slice(i);
+    }
+    const t = cur ? cur + ' ' + w : w;
+    if (pdfWidth(t, bold, size) <= maxW) cur = t; else { lines.push(cur); cur = w; }
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [''];
+}
+
+function newPdf() {
+  const W = 595, H = 842, pages = [];
+  let ops = null;
+  const f2 = n => String(Math.round(n * 100) / 100);
+  return {
+    W, H,
+    page() { ops = []; pages.push(ops); },
+    text(x, top, s, o = {}) {
+      const size = o.size || 10, bold = !!o.bold, color = o.color || [0.1, 0.13, 0.11];
+      const w = pdfWidth(s, bold, size);
+      const xx = o.align === 'right' ? x - w : o.align === 'center' ? x - w / 2 : x;
+      ops.push(`BT /${bold ? 'F2' : 'F1'} ${size} Tf ${color.map(f2).join(' ')} rg ${f2(xx)} ${f2(H - top)} Td (${pdfStr(pdfBytes(s))}) Tj ET`);
+    },
+    rect(x, top, w, h, color) { ops.push(`${color.map(f2).join(' ')} rg ${f2(x)} ${f2(H - top - h)} ${f2(w)} ${f2(h)} re f`); },
+    line(x1, x2, top, color, lw) { ops.push(`${lw || 0.7} w ${(color || [0.8, 0.82, 0.8]).map(f2).join(' ')} RG ${f2(x1)} ${f2(H - top)} m ${f2(x2)} ${f2(H - top)} l S`); },
+    build(title) {
+      const objs = [];
+      objs[0] = '<< /Type /Catalog /Pages 2 0 R >>';
+      objs[1] = `<< /Type /Pages /Kids [${pages.map((_, i) => `${5 + i * 2} 0 R`).join(' ')}] /Count ${pages.length} >>`;
+      objs[2] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+      objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+      pages.forEach((p, i) => {
+        const content = p.join('\n');
+        objs[4 + i * 2] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${6 + i * 2} 0 R >>`;
+        objs[5 + i * 2] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+      });
+      const infoNo = objs.length + 1;
+      objs.push(`<< /Title (${pdfStr(pdfBytes(title))}) /Producer (Bara Gestion) >>`);
+      let out = '%PDF-1.4\n%' + String.fromCharCode(226, 227, 207, 211) + '\n';
+      const offs = [];
+      objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+      const xref = out.length;
+      out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+      out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Info ${infoNo} 0 R >>\nstartxref\n${xref}\n%%EOF`;
+      const bytes = new Uint8Array(out.length);
+      for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 255;
+      return bytes;
+    }
+  };
+}
+
+/* ===== Factures ===== */
+const plainMoney = n => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');   // espace ordinaire : lisible partout
+const plainQty = n => String(Number(n)).replace('.', ',');
+const p2 = n => String(n).padStart(2, '0');
+const dtFull = s => { const d = new Date(s); return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+const invNo = n => 'F-' + String(n).padStart(4, '0');
+const GREEN = [0.12, 0.42, 0.29], GREY = [0.36, 0.4, 0.37], RED = [0.66, 0.2, 0.12];
+
+function invoicePdf(inv) {
+  const pdf = newPdf(), L = 40, R = 555, X_QTY = 372, X_PU = 462, X_AMT = R - 6;
+  let top;
+  const header = (first) => {
+    pdf.page();
+    if (first) {
+      pdf.text(L, 62, inv.shop.name, { size: 20, bold: true, color: GREEN });
+      let y = 80;
+      if (inv.shop.address) { pdf.text(L, y, inv.shop.address, { size: 10, color: GREY }); y += 14; }
+      if (inv.shop.phone) { pdf.text(L, y, 'Tél. : ' + inv.shop.phone, { size: 10, color: GREY }); y += 14; }
+      pdf.text(R, 62, 'FACTURE', { size: 20, bold: true, align: 'right' });
+      pdf.text(R, 80, 'N° ' + invNo(inv.no), { size: 11, bold: true, align: 'right' });
+      pdf.text(R, 94, dtFull(inv.date), { size: 10, align: 'right', color: GREY });
+      const ly = Math.max(y, 108) + 4;
+      pdf.line(L, R, ly, GREEN, 1.2);
+      let iy = ly + 22;
+      if (inv.seller) { pdf.text(L, iy, 'Vendeur : ' + inv.seller, { size: 10 }); iy += 15; }
+      if (inv.customer) { pdf.text(L, iy, 'Client : ' + inv.customer, { size: 10, bold: true }); iy += 15; }
+      pdf.text(L, iy, 'Paiement : ' + inv.pay, { size: 10 });
+      top = iy + 26;
+    } else {
+      pdf.text(L, 50, inv.shop.name + ' : facture ' + invNo(inv.no) + ' (suite)', { size: 10, bold: true, color: GREY });
+      top = 80;
+    }
+    pdf.rect(L, top, R - L, 22, [0.92, 0.95, 0.93]);
+    pdf.text(L + 8, top + 15, 'Désignation', { size: 9.5, bold: true });
+    pdf.text(X_QTY, top + 15, 'Quantité', { size: 9.5, bold: true, align: 'right' });
+    pdf.text(X_PU, top + 15, 'Prix unitaire', { size: 9.5, bold: true, align: 'right' });
+    pdf.text(X_AMT, top + 15, 'Montant', { size: 9.5, bold: true, align: 'right' });
+    top += 22;
+  };
+  header(true);
+  for (const l of inv.lines) {
+    const wrapped = pdfWrap(l.name, false, 10, X_QTY - L - 8 - 70);
+    const h = wrapped.length * 13 + 9;
+    if (top + h > 740) header(false);
+    wrapped.forEach((t, i) => pdf.text(L + 8, top + 15 + i * 13, t, { size: 10 }));
+    pdf.text(X_QTY, top + 15, plainQty(l.qty) + (l.unit ? ' ' + l.unit : ''), { size: 10, align: 'right' });
+    pdf.text(X_PU, top + 15, plainMoney(l.price), { size: 10, align: 'right' });
+    pdf.text(X_AMT, top + 15, plainMoney(l.total), { size: 10, align: 'right' });
+    top += h;
+    pdf.line(L, R, top, [0.86, 0.88, 0.86], 0.6);
+  }
+  if (top > 660) { header(false); }
+  top += 24;
+  const credit = inv.paid < inv.total;
+  pdf.text(X_QTY - 20, top, 'TOTAL', { size: 13, bold: true });
+  pdf.text(X_AMT, top, plainMoney(inv.total) + ' FCFA', { size: 13, bold: true, align: 'right' });
+  top += 20;
+  pdf.text(X_QTY - 20, top, 'Payé', { size: 10.5 });
+  pdf.text(X_AMT, top, plainMoney(inv.paid) + ' FCFA', { size: 10.5, align: 'right' });
+  if (credit) {
+    top += 18;
+    pdf.text(X_QTY - 20, top, 'Reste à payer', { size: 11, bold: true, color: RED });
+    pdf.text(X_AMT, top, plainMoney(inv.total - inv.paid) + ' FCFA', { size: 11, bold: true, align: 'right', color: RED });
+  }
+  if (inv.shop.footer) pdf.text(pdf.W / 2, 790, inv.shop.footer, { size: 10, align: 'center', color: GREY });
+  pdf.text(pdf.W / 2, 815, 'Établi avec Bara Gestion', { size: 7.5, align: 'center', color: [0.6, 0.64, 0.61] });
+  return pdf.build('Facture ' + invNo(inv.no));
+}
+
+function invoiceText(inv) {
+  const rows = inv.lines.map(l => `- ${plainQty(l.qty)}${l.unit ? ' ' + l.unit : ''} ${l.name} : ${plainMoney(l.total)} FCFA`);
+  return [`${inv.shop.name}`, `Facture ${invNo(inv.no)} du ${dtFull(inv.date)}`, ...rows, `Total : ${plainMoney(inv.total)} FCFA`,
+    ...(inv.paid < inv.total ? [`Reste à payer : ${plainMoney(inv.total - inv.paid)} FCFA`] : []),
+    ...(inv.shop.footer ? ['', inv.shop.footer] : [])].join('\n');
+}
+/* ===== PDF:end ===== */
+
+/* ===== Facture : écran, partage, téléchargement ===== */
+async function ensureNames() {
+  if (!isManager() || S.names) return;
+  const { data } = await sb.from('shop_members').select('user_id, display_name').eq('shop_id', S.shop.id);
+  S.names = {};
+  (data || []).forEach(m => { S.names[m.user_id] = m.display_name; });
+}
+
+async function loadSale(id) {
+  const { data, error } = await sb.from('sales').select(SALE_COLS).eq('id', id).eq('shop_id', S.shop.id).maybeSingle();
+  if (error || !data) throw new Error(error ? cleanErr(error) : 'Vente introuvable');
+  return data;
+}
+
+async function buildInvoice(s) {
+  await ensureNames();
+  const seller = s.created_by === S.user.id ? S.shop.who : ((S.names && S.names[s.created_by]) || '');
+  return {
+    shop: { name: S.shop.name, phone: S.shop.phone || '', address: S.shop.address || '', footer: S.shop.footer || '' },
+    no: s.invoice_no, date: s.created_at, seller, customer: s.customer_name || '', pay: PAY[s.payment_method] || '',
+    lines: (s.sale_items || []).map(i => ({ name: i.products?.name || 'Produit', unit: UNITS[i.products?.unit] || '',
+      qty: i.quantity, price: i.unit_price, total: i.line_total })),
+    total: s.total, paid: s.paid
+  };
+}
+
+function downloadInvoice(inv) {
+  const url = URL.createObjectURL(new Blob([invoicePdf(inv)], { type: 'application/pdf' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = `Facture-${invNo(inv.no)}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 15000);
+}
+
+async function shareInvoice(inv) {
+  const name = `Facture-${invNo(inv.no)}.pdf`;
+  const text = invoiceText(inv);
+  try {
+    const file = new File([invoicePdf(inv)], name, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: `Facture ${invNo(inv.no)}`, text: `${inv.shop.name} : facture ${invNo(inv.no)}` });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;            // l'utilisateur a fermé le menu de partage
+  }
+  // Ordinateur ou navigateur sans partage de fichier : message WhatsApp avec le détail.
+  window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
+  toast('Message WhatsApp préparé. Pour envoyer le PDF, utilisez « Télécharger ».');
+}
+
+async function openInvoice(saleOrId) {
+  let inv;
+  try { inv = await buildInvoice(typeof saleOrId === 'string' ? await loadSale(saleOrId) : saleOrId); }
+  catch (e) { return toast(e.message, true); }
+  const incomplete = !inv.shop.phone && !inv.shop.address;
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Facture">
+    <h2>Facture ${esc(invNo(inv.no))}</h2>
+    <div class="card" style="display:grid;gap:4px">
+      <div><b>${esc(inv.shop.name)}</b></div>
+      ${inv.shop.address ? `<div class="muted">${esc(inv.shop.address)}</div>` : ''}${inv.shop.phone ? `<div class="muted">Tél. ${esc(inv.shop.phone)}</div>` : ''}
+      <div class="muted">${esc(dtFull(inv.date))}${inv.seller ? ' · ' + esc(inv.seller) : ''}</div>
+      ${inv.customer ? `<div>Client : <b>${esc(inv.customer)}</b></div>` : ''}
+      <ul style="margin:6px 0 0;padding-left:18px">${inv.lines.map(l => `<li>${esc(plainQty(l.qty))} ${esc(l.unit)} ${esc(l.name)} · ${esc(money(l.total))}</li>`).join('')}</ul>
+      <div class="total" style="margin-top:6px"><span>Total</span><span class="num">${esc(money(inv.total))}</span></div>
+      ${inv.paid < inv.total ? `<div style="color:var(--bad);font-weight:600">Reste à payer : ${esc(money(inv.total - inv.paid))}</div>` : ''}
+    </div>
+    ${incomplete && S.role === 'owner' ? `<div class="banner">Ajoutez l'adresse et le téléphone de la boutique (onglet Équipe, « Fiche de la boutique ») pour qu'ils apparaissent sur la facture.</div>` : ''}
+    <div class="row"><button class="btn" id="inv-share">Envoyer par WhatsApp</button><button class="btn ghost" id="inv-dl">Télécharger le PDF</button></div>
+    <button class="btn ghost" id="inv-close">Fermer</button></div></div>`;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#inv-close').onclick = closeSheet;
+  $('#inv-dl').onclick = () => downloadInvoice(inv);
+  $('#inv-share').onclick = () => shareInvoice(inv);
+}
+
+/* ===== Fiche de la boutique (propriétaire) ===== */
+function openShopProfile() {
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Fiche de la boutique">
+    <h2>Fiche de la boutique</h2>
+    <p class="muted" style="margin:0">Ces informations sont imprimées sur chaque facture.</p>
+    <label>Nom de la boutique<input id="s-name" maxlength="100" required value="${esc(S.shop.name)}"></label>
+    <label>Téléphone<input id="s-phone" maxlength="30" inputmode="tel" value="${esc(S.shop.phone || '')}" placeholder="ex. +226 70 00 00 00"></label>
+    <label>Adresse ou ville<input id="s-addr" maxlength="200" value="${esc(S.shop.address || '')}" placeholder="ex. Bèguédo, Boulgou"></label>
+    <label>Phrase de bas de page<input id="s-foot" maxlength="200" value="${esc(S.shop.footer || '')}" placeholder="ex. Merci de votre confiance"></label>
+    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const v = { name: $('#s-name').value.trim(), phone: $('#s-phone').value.trim(), address: $('#s-addr').value.trim(), footer: $('#s-foot').value.trim() };
+    const { error } = await sb.rpc('update_shop_profile', { p_shop: S.shop.id, p_name: v.name, p_phone: v.phone, p_address: v.address, p_footer: v.footer });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    S.shop.name = v.name; S.shop.phone = v.phone; S.shop.address = v.address; S.shop.footer = v.footer;
+    const m = S.memberships.find(x => x.shop_id === S.shop.id);
+    if (m) m.shops = { ...m.shops, name: v.name, phone: v.phone || null, address: v.address || null, invoice_footer: v.footer || null };
+    closeSheet(); toast('Fiche enregistrée.'); draw();
+  };
+  $('#s-name').focus();
 }
 
 boot().catch(e => fatal(e));
