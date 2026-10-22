@@ -176,8 +176,8 @@ const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status
 /* ===== Démarrage ===== */
 async function boot() {
   const { data } = await sb.auth.getSession();
-  if (data.session) { S.user = data.session.user; await loadContext(); } else drawLogin();
   sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; const m = S.kick; S.kick = null; drawLogin(m); } });
+  if (data.session) { S.user = data.session.user; await loadContext(); } else drawLogin();
   startGuard();
 }
 
@@ -228,7 +228,18 @@ async function loadContext() {
     .select('shop_id, role, display_name, shops(name, shop_type, phone, address, invoice_footer)')
     .eq('user_id', S.user.id).eq('active', true);
   if (error) return fatal(error);
-  S.memberships = data || [];
+  // Connexion fermée à distance mais jeton encore en mémoire : la base cache les boutiques.
+  // On renvoie alors proprement vers l'écran de connexion au lieu d'afficher une erreur.
+  if ((data || []).some(m => !m.shops)) {
+    let valid = true;
+    try { const r = await sb.rpc('session_valid'); if (!r.error && r.data === false) valid = false; } catch (e) {}
+    if (!valid) {
+      S.kick = 'Votre connexion a été fermée (nouveau mot de passe, ou connexion sur un autre appareil). Reconnectez-vous.';
+      await sb.auth.signOut({ scope: 'local' });
+      return;
+    }
+  }
+  S.memberships = (data || []).filter(m => m.shops);
   if (!S.memberships.length) {
     $('#app').innerHTML = `<div class="login"><div class="brand">Bara Gestion</div>
       <div class="banner">Ce compte n'est rattaché à aucune boutique. Demandez au propriétaire de vous ajouter.</div>
