@@ -992,6 +992,11 @@ function openShopProfile() {
 }
 
 boot().catch(e => fatal(e));
+
+/* Hors ligne (étape 1) : le gardien garde une copie de l'application pour l'ouvrir sans internet. */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
 </script>
 </body>
 </html>
