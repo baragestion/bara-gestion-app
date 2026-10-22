@@ -133,6 +133,17 @@ const storage = {
 };
 const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { storage, persistSession: true, autoRefreshToken: true } });
 
+/* Sortie fiable : si la connexion a déjà été fermée côté serveur, signOut() peut échouer
+   sans rien effacer. On efface donc nous-mêmes la session gardée dans le navigateur. */
+const KICK_MSG = 'Votre connexion a été fermée (nouveau mot de passe, ou connexion sur un autre appareil). Reconnectez-vous.';
+async function leave(msg) {
+  try { await Promise.race([sb.auth.signOut({ scope: 'local' }), new Promise(r => setTimeout(r, 4000))]); } catch (e) {}
+  try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch (e) {}
+  Object.keys(mem).filter(k => k.startsWith('sb-')).forEach(k => delete mem[k]);
+  S.user = null; S.kick = null;
+  drawLogin(msg || null);
+}
+
 /* ===== Utilitaires ===== */
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -189,8 +200,8 @@ async function checkSession() {
   try {
     const { data, error } = await sb.rpc('session_valid');
     if (!error && data === false) {
-      S.kick = 'Votre connexion a été fermée (nouveau mot de passe, ou connexion sur un autre appareil). Reconnectez-vous.';
-      await sb.auth.signOut({ scope: 'local' });
+      S.checking = false;
+      return leave(KICK_MSG);
     }
   } catch (e) { /* hors ligne : on réessaiera */ }
   S.checking = false;
@@ -234,9 +245,7 @@ async function loadContext() {
     let valid = true;
     try { const r = await sb.rpc('session_valid'); if (!r.error && r.data === false) valid = false; } catch (e) {}
     if (!valid) {
-      S.kick = 'Votre connexion a été fermée (nouveau mot de passe, ou connexion sur un autre appareil). Reconnectez-vous.';
-      await sb.auth.signOut({ scope: 'local' });
-      return;
+      return leave(KICK_MSG);
     }
   }
   S.memberships = (data || []).filter(m => m.shops);
@@ -244,7 +253,7 @@ async function loadContext() {
     $('#app').innerHTML = `<div class="login"><div class="brand">Bara Gestion</div>
       <div class="banner">Ce compte n'est rattaché à aucune boutique. Demandez au propriétaire de vous ajouter.</div>
       <button class="btn ghost" id="out">Se déconnecter</button></div>`;
-    $('#out').onclick = () => sb.auth.signOut();
+    $('#out').onclick = () => leave();
     return;
   }
   let pick = S.memberships[0];
@@ -324,7 +333,7 @@ function draw() {
     <main id="view"></main>
     <nav class="tabs" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k?'aria-current="page"':''}>${l}</button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
-  $('#logout').onclick = () => sb.auth.signOut();
+  $('#logout').onclick = () => leave();
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; draw(); });
   ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam })[S.tab]();
