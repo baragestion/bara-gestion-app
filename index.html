@@ -140,7 +140,8 @@ async function leave(msg) {
   try { await Promise.race([sb.auth.signOut({ scope: 'local' }), new Promise(r => setTimeout(r, 4000))]); } catch (e) {}
   try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch (e) {}
   Object.keys(mem).filter(k => k.startsWith('sb-')).forEach(k => delete mem[k]);
-  S.user = null; S.kick = null;
+  clearCache();
+  S.user = null; S.kick = null; S.offline = false;
   drawLogin(msg || null);
 }
 
@@ -179,23 +180,86 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false
+  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
 
+/* ===== Copie locale du catalogue (hors ligne, étape 2) =====
+   Gardée sur le téléphone : produits, prix de vente et stock. JAMAIS les prix d'achat, l'équipe
+   ni les ventes. Liée à la personne connectée, effacée à la déconnexion, périmée après 3 jours. */
+const CACHE_KEY = 'bg_offline_v1';
+const CACHE_MAX_MS = 3 * 24 * 3600 * 1000;
+function saveCache() {
+  try {
+    if (!S.user || !S.shop || S.offline) return;
+    storage.setItem(CACHE_KEY, JSON.stringify({
+      v: 1, savedAt: Date.now(), userId: S.user.id, role: S.role,
+      shop: { id: S.shop.id, name: S.shop.name, type: S.shop.type, who: S.shop.who,
+              phone: S.shop.phone, address: S.shop.address, footer: S.shop.footer },
+      products: S.products.map(p => ({ id: p.id, name: p.name, category: p.category, unit: p.unit,
+        sell_price: p.sell_price, stock_qty: p.stock_qty, alert_threshold: p.alert_threshold, barcode: p.barcode }))
+    }));
+  } catch (e) {}
+}
+function readCache() {
+  try {
+    const c = JSON.parse(storage.getItem(CACHE_KEY) || 'null');
+    if (!c || c.v !== 1 || typeof c.userId !== 'string' || !c.shop || !Array.isArray(c.products)) return null;
+    const age = Date.now() - Number(c.savedAt);
+    if (!(age >= -300000 && age <= CACHE_MAX_MS)) return null;      // trop ancienne (ou horloge truquée)
+    if (!['owner', 'manager', 'seller'].includes(c.role)) return null;
+    return c;
+  } catch (e) { return null; }
+}
+function clearCache() { try { storage.removeItem(CACHE_KEY); } catch (e) {} }
+function hasStoredSession() {
+  try { return Object.keys(localStorage).some(k => k.startsWith('sb-') && k.endsWith('-auth-token')); } catch (e) { return false; }
+}
+const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|Load failed/i.test((e && e.message) || '');
+
+function startOffline(c) {
+  S.offline = true; S.user = { id: c.userId }; S.role = c.role; S.shop = { ...c.shop };
+  S.memberships = [{ shop_id: c.shop.id, role: c.role, display_name: c.shop.who, shops: { name: c.shop.name } }];
+  S.products = c.products; S.costs = {}; S.sub = { status: 'offline' }; S.cachedAt = c.savedAt;
+  S.cart = new Map(); S.ref = uuid(); S.last = null; S.sales = null; S.summary = null; S.team = null; S.tab = 'sale';
+  draw();
+  // Le signal « réseau revenu » arrive parfois avant que la connexion soit utilisable : on réessaie.
+  clearTimeout(S.retry);
+  S.retry = setTimeout(() => { if (S.offline && navigator.onLine) resume(); }, 8000);
+}
+async function resume() {            // le réseau est revenu
+  S.offline = false;
+  let session = null;
+  try { session = (await sb.auth.getSession()).data.session; } catch (e) {}
+  if (session) { S.user = session.user; await loadContext(); return; }
+  // Pas de session lisible : réseau pas encore stable, ou connexion vraiment fermée ?
+  // Si la session est toujours gardée sur le téléphone, on reste hors ligne et on réessaie.
+  const c = readCache();
+  if (c && hasStoredSession()) return startOffline(c);
+  S.user = null; clearCache(); drawLogin();
+}
+window.addEventListener('online', () => { if (S.offline) resume(); });
+
 /* ===== Démarrage ===== */
 async function boot() {
-  const { data } = await sb.auth.getSession();
-  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { S.user = null; const m = S.kick; S.kick = null; drawLogin(m); } });
-  if (data.session) { S.user = data.session.user; await loadContext(); } else drawLogin();
+  let session = null;
+  try { session = (await sb.auth.getSession()).data.session; } catch (e) {}
+  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { clearCache(); S.user = null; const m = S.kick; S.kick = null; drawLogin(m); } });
+  if (session) { S.user = session.user; await loadContext(); }
+  else {
+    // Pas de session lisible : sans réseau, on rouvre la copie locale si elle est valide et récente.
+    const c = readCache();
+    if (c && !navigator.onLine && hasStoredSession()) startOffline(c);
+    else { if (navigator.onLine) clearCache(); drawLogin(); }
+  }
   startGuard();
 }
 
 /* Session fermée à distance (nouveau mot de passe, connexion sur un autre appareil) :
    on le détecte vite et on renvoie vers l'écran de connexion. */
 async function checkSession() {
-  if (!S.user || S.checking) return;
+  if (!S.user || S.checking || S.offline) return;
   S.checking = true;
   try {
     const { data, error } = await sb.rpc('session_valid');
@@ -238,7 +302,11 @@ async function loadContext() {
   const { data, error } = await sb.from('shop_members')
     .select('shop_id, role, display_name, shops(name, shop_type, phone, address, invoice_footer)')
     .eq('user_id', S.user.id).eq('active', true);
-  if (error) return fatal(error);
+  if (error) {
+    const c = readCache();
+    if (isNetErr(error) && c && c.userId === S.user.id) return startOffline(c);
+    return fatal(error);
+  }
   // Connexion fermée à distance mais jeton encore en mémoire : la base cache les boutiques.
   // On renvoie alors proprement vers l'écran de connexion au lieu d'afficher une erreur.
   if ((data || []).some(m => !m.shops)) {
@@ -283,6 +351,7 @@ async function loadProducts() {
     .eq('shop_id', S.shop.id).eq('active', true).order('name');
   if (error) return toast(cleanErr(error), true);
   S.products = data || [];
+  saveCache();
   if (isManager()) {
     const c = await sb.from('product_costs').select('product_id,buy_price').eq('shop_id', S.shop.id);
     S.costs = {};
@@ -298,6 +367,10 @@ function fatal(e) {
 
 /* ===== Structure générale ===== */
 function banner() {
+  if (S.offline) {
+    const d = new Date(S.cachedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return `<div class="banner">Hors ligne. Catalogue enregistré le ${esc(d)} : consultation seulement, le stock peut avoir changé. Les ventes reviendront avec la connexion.</div>`;
+  }
   const s = S.sub || {};
   // Les dates de l'abonnement ne concernent que le propriétaire. Les employés voient seulement
   // un message si la boutique ne peut plus vendre.
@@ -314,9 +387,13 @@ function banner() {
 }
 
 function draw() {
-  const tabs = [['sale','Vente'], ['products','Produits'], ['history','Historique']];
-  if (isManager()) tabs.push(['report','Bilan']);
-  if (S.role === 'owner') tabs.push(['team','Équipe']);
+  const tabs = [['sale','Vente'], ['products','Produits']];
+  if (S.offline) { if (!['sale', 'products'].includes(S.tab)) S.tab = 'sale'; }   // le reste demande internet
+  else {
+    tabs.push(['history','Historique']);
+    if (isManager()) tabs.push(['report','Bilan']);
+    if (S.role === 'owner') tabs.push(['team','Équipe']);
+  }
   const multi = S.memberships.length > 1;
   $('#app').innerHTML = `
     <header class="top">
