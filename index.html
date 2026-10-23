@@ -180,7 +180,7 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0
+  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, alertCount: 0, alerts: null, devices: null, offAllowed: null
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
@@ -196,7 +196,8 @@ function saveCache() {
     storage.setItem(CACHE_KEY, JSON.stringify({
       v: 1, savedAt: Date.now(), userId: S.user.id, role: S.role,
       shop: { id: S.shop.id, name: S.shop.name, type: S.shop.type, who: S.shop.who,
-              phone: S.shop.phone, address: S.shop.address, footer: S.shop.footer },
+              phone: S.shop.phone, address: S.shop.address, footer: S.shop.footer,
+              offAllowed: !!S.shop.offAllowed, maxPending: S.shop.maxPending || 30 },
       products: S.products.map(p => ({ id: p.id, name: p.name, category: p.category, unit: p.unit,
         sell_price: p.sell_price, stock_qty: p.stock_qty, alert_threshold: p.alert_threshold, barcode: p.barcode }))
     }));
@@ -241,6 +242,245 @@ async function resume() {            // le réseau est revenu
 }
 window.addEventListener('online', () => { if (S.offline) resume(); });
 
+/* ===== Ventes hors ligne (étape 3) =====
+   Une vente faite sans réseau est gardée dans le téléphone (file d'attente), avec :
+   - une référence unique et permanente (H-<code du téléphone>-<numéro>), celle du reçu du client ;
+   - le prix affiché au moment de la vente et l'heure du téléphone.
+   Elle n'est retirée de la file qu'APRÈS confirmation par le serveur. Un envoi répété est
+   reconnu par le serveur (même référence) : jamais de vente comptée deux fois. */
+const QUEUE_KEY = 'bg_queue_v1', DEVICE_KEY = 'bg_device', SEQ_KEY = 'bg_offseq';
+
+function deviceId() {
+  try {
+    let d = localStorage.getItem(DEVICE_KEY);
+    if (!d || !/^[0-9a-f-]{36}$/i.test(d)) { d = uuid(); localStorage.setItem(DEVICE_KEY, d); }
+    return d;
+  } catch (e) { return null; }                    // mémoire inaccessible : pas de vente hors ligne
+}
+const deviceCode = d => d.replace(/-/g, '').slice(0, 6).toUpperCase();
+
+function readQueue() {
+  try { const q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); return Array.isArray(q) ? q : []; }
+  catch (e) { return []; }
+}
+// Écriture vérifiée : si le téléphone n'a pas pu enregistrer, on le sait (et on le dit).
+function writeQueue(q) {
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+  if (localStorage.getItem(QUEUE_KEY) !== JSON.stringify(q)) throw new Error('écriture non confirmée');
+}
+const myQueue = () => S.user && S.shop ? readQueue().filter(r => r.user_id === S.user.id && r.shop_id === S.shop.id) : [];
+const pendingMine = () => S.user ? readQueue().filter(r => r.user_id === S.user.id).length : 0;
+const offlineRight = () => !!S.shop && (S.role === 'owner' || !!S.shop.offAllowed);
+const canSellOffline = () => S.offline && offlineRight();
+
+function nextRef(dev) {
+  let n = 0;
+  try { n = Number(localStorage.getItem(SEQ_KEY)) || 0; } catch (e) {}
+  n += 1;
+  localStorage.setItem(SEQ_KEY, String(n));       // gardé AVANT la vente : une référence n'est jamais réutilisée
+  return `H-${deviceCode(dev)}-${String(n).padStart(4, '0')}`;
+}
+
+function queueSale(total, paid, pay, customer) {
+  const dev = deviceId();
+  if (!dev) { toast('Ce téléphone ne permet pas de garder des ventes hors ligne (mémoire bloquée).', true); return drawCart(); }
+  if (pendingMine() >= (S.shop.maxPending || 30)) {
+    toast(`Plafond atteint : ${S.shop.maxPending || 30} ventes attendent déjà. Retrouvez du réseau pour les envoyer.`, true);
+    return drawCart();
+  }
+  for (const [id, q] of S.cart) {
+    const p = S.products.find(x => x.id === id);
+    if (!p || !(q > 0) || q > 1000000 || Math.round(q * 1000) !== q * 1000 || (WHOLE.includes(p.unit) && !Number.isInteger(q))) {
+      toast('Quantité invalide' + (p ? ' pour ' + p.name : '') + (p && WHOLE.includes(p.unit) ? ' (nombre entier)' : ''), true);
+      return drawCart();
+    }
+  }
+  if (customer && customer.length > 100) { toast('Nom du client trop long.', true); return drawCart(); }
+  if (paid < 0 || paid > total || !Number.isFinite(paid)) { toast('Le montant encaissé doit être compris entre 0 et le total.', true); return drawCart(); }
+  if (paid < total && !customer) { toast('Le nom du client est obligatoire pour une vente à crédit.', true); return drawCart(); }
+  const items = [...S.cart].map(([id, q]) => {
+    const p = S.products.find(x => x.id === id);
+    return { product_id: id, quantity: q, unit_price: Number(p.sell_price), name: p.name, unit: p.unit };
+  });
+  let rec;
+  try {
+    rec = { client_ref: S.ref, offline_ref: nextRef(dev), device_id: dev, shop_id: S.shop.id, user_id: S.user.id,
+      seller: S.shop.who, created_at: new Date().toISOString(), items, total, paid, payment_method: pay, customer };
+    const q = readQueue();
+    if (!q.some(r => r.client_ref === rec.client_ref)) q.push(rec);
+    writeQueue(q);
+  } catch (e) {
+    toast('Vente NON enregistrée : la mémoire du téléphone est pleine ou bloquée. Notez-la sur papier.', true);
+    return drawCart();
+  }
+  // Stock affiché : on le baisse aussi sur le téléphone (la vraie valeur viendra du serveur).
+  items.forEach(i => { const p = S.products.find(x => x.id === i.product_id); if (p) p.stock_qty = Number(p.stock_qty) - i.quantity; });
+  try {
+    const c = JSON.parse(storage.getItem(CACHE_KEY) || 'null');
+    if (c && c.userId === S.user.id) { c.products = S.products.map(p => ({ ...p })); storage.setItem(CACHE_KEY, JSON.stringify(c)); }
+  } catch (e) {}
+  S.cart.clear(); S.ref = uuid(); S.last = { rec, total };
+  toast('Vente gardée sur le téléphone : ' + money(total) + ' (réf. ' + rec.offline_ref + ')');
+  draw();
+  syncQueue();
+}
+
+// Vente de la file → même forme qu'une vente du serveur (pour le reçu).
+function recToSale(r) {
+  return { invoice_no: null, offline_ref: r.offline_ref, created_at: r.created_at, client_created_at: r.created_at,
+    created_by: r.user_id, customer_name: r.customer, payment_method: r.payment_method, total: r.total, paid: r.paid,
+    sale_items: r.items.map(i => ({ quantity: i.quantity, unit_price: i.unit_price,
+      line_total: Math.round(i.quantity * i.unit_price), products: { name: i.name, unit: i.unit } })) };
+}
+
+// Envoi de la file : dans l'ordre, une vente à la fois, retirée seulement après confirmation.
+async function syncQueue(manual) {
+  if (S.syncing || S.offline || !S.user || !S.shop || !navigator.onLine) return;
+  const mine = myQueue();
+  if (!mine.length) return;
+  S.syncing = true;
+  let sent = 0, stop = false, changed = false;
+  for (const r of mine) {
+    if (stop) break;
+    const { data, error } = await sb.rpc('sync_offline_sale', {
+      p_shop: r.shop_id, p_device: r.device_id, p_offline_ref: r.offline_ref, p_client_ref: r.client_ref,
+      p_created_at: r.created_at, p_items: r.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price })),
+      p_paid: r.paid, p_payment_method: r.payment_method, p_customer: r.customer });
+    const q = readQueue();
+    if (!error && data && data.sale_id) {
+      try { writeQueue(q.filter(x => x.client_ref !== r.client_ref)); } catch (e) { stop = true; }
+      if (S.last && S.last.rec && S.last.rec.client_ref === r.client_ref) S.last = { id: data.sale_id, total: r.total };
+      sent++;
+    } else {
+      if (isNetErr(error)) { stop = true; break; }    // réseau encore instable : on réessaiera
+      const msg = cleanErr(error);
+      if (r.error !== msg) { changed = true; try { writeQueue(q.map(x => x.client_ref === r.client_ref ? { ...x, error: msg } : x)); } catch (e) {} }
+      if (/Accès refusé|lecture seule|Droits/i.test(msg)) stop = true;   // inutile d'insister pour les autres
+    }
+  }
+  S.syncing = false;
+  if (sent) {
+    toast(sent === 1 ? '1 vente hors ligne envoyée.' : `${sent} ventes hors ligne envoyées.`);
+    S.sales = null; S.summary = null;
+    await loadProducts();
+  } else if (manual) {
+    toast(myQueue().length ? 'Envoi impossible pour le moment.' : 'Rien à envoyer.', !!myQueue().length);
+  }
+  registerDevice();
+  // On rafraîchit l'écran seulement si quelque chose a changé, et jamais au milieu d'une vente.
+  if ((sent || changed) && !S.offline && $('#view') && !(S.tab === 'sale' && S.cart.size)) draw();
+}
+
+// Le téléphone se présente au serveur (identité + nombre de ventes en attente).
+async function registerDevice() {
+  const dev = deviceId();
+  if (!dev || S.offline || !S.shop) return;
+  try {
+    const { error } = await sb.rpc('register_device', { p_shop: S.shop.id, p_device: dev, p_pending: pendingMine() });
+    if (error && /en double/.test(error.message || '')) toast(error.message, true);
+  } catch (e) {}
+}
+
+async function loadAlertCount() {
+  if (S.role !== 'owner') return;
+  try {
+    const { count } = await sb.from('alerts').select('id', { count: 'exact', head: true }).eq('shop_id', S.shop.id).is('seen_at', null);
+    S.alertCount = count || 0;
+  } catch (e) { S.alertCount = 0; }
+}
+
+function pendingBanner() {
+  const n = myQueue().length;
+  const others = S.user ? readQueue().filter(r => r.user_id !== S.user.id).length : 0;
+  let h = '';
+  if (n) {
+    const err = myQueue().find(r => r.error);
+    h += `<div class="banner ${err ? 'bad' : ''}">${n} vente(s) en attente d'envoi sur ce téléphone.${err ? ' Dernier refus : ' + esc(err.error) : ''}</div>`;
+  }
+  if (others) h += `<div class="banner">${others} vente(s) d'un autre compte attendent sur ce téléphone : cette personne doit se reconnecter ici pour les envoyer.</div>`;
+  return h;
+}
+
+// Quitter avec des ventes non envoyées : on prévient (elles restent sur le téléphone).
+function askLeave() {
+  const n = pendingMine();
+  if (!n) return leave();
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Quitter">
+    <h2>Ventes non envoyées</h2>
+    <p>${n} vente(s) sont encore sur ce téléphone. Elles ne seront pas effacées, mais elles ne partiront que lorsque vous vous reconnecterez ici avec internet.</p>
+    <div class="row"><button class="btn" id="stay">Rester connecté</button><button class="btn ghost" id="go">Quitter quand même</button></div></div></div>`;
+  $('#stay').onclick = closeSheet;
+  $('#go').onclick = () => { closeSheet(); leave(); };
+}
+
+/* Onglet Équipe : réglages hors ligne, téléphones et alertes (propriétaire). */
+const ALERT_TEXT = {
+  price_diff: (a, who) => `Prix différent sur une vente hors ligne de ${who} (réf. ${a.details.ref}) : ` +
+    (a.details.lines || []).map(l => `${l.product} vendu ${money(l.sold_at)} au lieu de ${money(l.current)}`).join(', '),
+  negative_stock: (a, who) => `Stock négatif : ${a.details.product} (${qty(a.details.stock)}) après la vente ${a.details.ref} de ${who}. Comptez le stock réel.`,
+  device_new: (a, who) => `Nouveau téléphone ou données effacées pour ${who} (code ${a.details.code}). Normal s'il a changé de téléphone, à vérifier sinon.`,
+  offline_not_allowed: (a, who) => `${who} a vendu hors ligne sans autorisation (réf. ${a.details.ref}). La vente a été gardée.`,
+  clock: (a, who) => `Heure incorrecte sur le téléphone de ${who} pour la vente ${a.details.ref}.`
+};
+
+async function loadOfflineAdmin() {
+  const [m, d, a] = await Promise.all([
+    sb.from('shop_members').select('user_id, offline_allowed').eq('shop_id', S.shop.id),
+    sb.from('devices').select('user_id, code, pending, last_seen').eq('shop_id', S.shop.id).order('last_seen', { ascending: false }),
+    sb.from('alerts').select('id, kind, user_id, details, created_at, seen_at').eq('shop_id', S.shop.id).order('created_at', { ascending: false }).limit(30)]);
+  if (m.error || d.error || a.error) throw new Error(cleanErr(m.error || d.error || a.error));
+  S.offAllowed = {}; (m.data || []).forEach(r => { S.offAllowed[r.user_id] = r.offline_allowed; });
+  S.devices = d.data || []; S.alerts = a.data || [];
+}
+
+function offlineAdminHtml() {
+  const name = id => esc((S.names && S.names[id]) || 'compte supprimé');
+  const unseen = S.alerts.filter(a => !a.seen_at).length;
+  return `
+    <section class="card stack">
+      <h2>Vente hors ligne</h2>
+      <p class="muted" style="margin:0;font-size:13px">Sans réseau, un employé autorisé peut vendre : les ventes sont gardées sur son téléphone puis envoyées au retour du réseau. Vous, le propriétaire, êtes toujours autorisé.</p>
+      <form id="off-lim" class="row" style="align-items:flex-end">
+        <label>Ventes en attente au maximum par téléphone<input id="off-max" type="number" min="1" max="500" step="1" value="${esc(S.shop.maxPending || 30)}"></label>
+        <button class="btn ghost small" type="submit" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Enregistrer</button></form>
+      <h3 style="margin:6px 0 0">Téléphones</h3>
+      ${S.devices.length ? S.devices.map(d => `<div class="row muted" style="font-size:13.5px"><span><b style="color:var(--fg)">${name(d.user_id)}</b> · code ${esc(d.code)}</span>
+        <span style="text-align:right">vu ${dt(d.last_seen)}${d.pending ? ` · <b style="color:var(--bad)">${esc(d.pending)} en attente</b>` : ''}</span></div>`).join('')
+        : '<p class="muted" style="margin:0">Aucun téléphone enregistré pour le moment.</p>'}
+    </section>
+    <section class="card stack">
+      <div class="row"><h2 style="flex:1 1 auto">Alertes${unseen ? ` (${unseen} nouvelle${unseen > 1 ? 's' : ''})` : ''}</h2>
+        ${unseen ? '<button class="btn ghost small" id="al-seen" style="flex:0 0 auto">Marquer comme vues</button>' : ''}</div>
+      ${S.alerts.length ? S.alerts.map(a => `<div style="font-size:13.5px;${a.seen_at ? 'opacity:.65' : ''}">
+          <span class="muted">${dt(a.created_at)}</span> ${a.seen_at ? '' : '<span class="tag warn">Nouveau</span>'}<br>${esc((ALERT_TEXT[a.kind] || (() => a.kind))(a, (S.names && S.names[a.user_id]) || 'compte supprimé'))}</div>`).join('')
+        : '<p class="muted" style="margin:0">Aucune alerte.</p>'}
+    </section>`;
+}
+
+function bindOfflineAdmin() {
+  $('#off-lim').onsubmit = async ev => {
+    ev.preventDefault();
+    const v = Math.round(Number($('#off-max').value));
+    const { error } = await sb.rpc('set_offline_limit', { p_shop: S.shop.id, p_max: v });
+    if (error) return toast(cleanErr(error), true);
+    S.shop.maxPending = v; toast('Plafond enregistré.'); saveCache();
+  };
+  const seen = $('#al-seen');
+  if (seen) seen.onclick = async () => {
+    const { error } = await sb.rpc('mark_alerts_seen', { p_shop: S.shop.id });
+    if (error) return toast(cleanErr(error), true);
+    S.alertCount = 0; S.alerts = null; S.team = null; draw();
+  };
+  document.querySelectorAll('[data-off]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const to = b.dataset.to === '1';
+    const { error } = await sb.rpc('set_offline_allowed', { p_shop: S.shop.id, p_user: b.dataset.off, p_allowed: to });
+    if (error) { b.disabled = false; return toast(cleanErr(error), true); }
+    toast(to ? 'Vente hors ligne autorisée.' : 'Vente hors ligne retirée (effective à la prochaine connexion de l\'employé).');
+    S.offAllowed = null; viewTeam();
+  });
+}
+
 /* ===== Démarrage ===== */
 async function boot() {
   let session = null;
@@ -271,7 +511,7 @@ async function checkSession() {
   S.checking = false;
 }
 function startGuard() {
-  setInterval(checkSession, 30000);
+  setInterval(() => { checkSession(); syncQueue(); }, 30000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkSession(); });
 }
 
@@ -300,7 +540,7 @@ function drawLogin(msg) {
 async function loadContext() {
   $('#app').innerHTML = '<p class="empty">Chargement…</p>';
   const { data, error } = await sb.from('shop_members')
-    .select('shop_id, role, display_name, shops(name, shop_type, phone, address, invoice_footer)')
+    .select('shop_id, role, display_name, offline_allowed, shops(name, shop_type, phone, address, invoice_footer, offline_max_pending)')
     .eq('user_id', S.user.id).eq('active', true);
   if (error) {
     const c = readCache();
@@ -332,12 +572,16 @@ async function loadContext() {
 async function selectShop(id) {
   const m = S.memberships.find(x => x.shop_id === id);
   S.shop = { id, name: m.shops.name, type: m.shops.shop_type, who: m.display_name,
-    phone: m.shops.phone || '', address: m.shops.address || '', footer: m.shops.invoice_footer || '' };
+    phone: m.shops.phone || '', address: m.shops.address || '', footer: m.shops.invoice_footer || '',
+    offAllowed: !!m.offline_allowed, maxPending: Number(m.shops.offline_max_pending) || 30 };
   S.role = m.role;
   storage.setItem('bg_shop', id);
   S.cart = new Map(); S.ref = uuid(); S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
-  await Promise.all([loadProducts(), loadSub()]);
+  S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
+  await Promise.all([loadProducts(), loadSub(), loadAlertCount()]);
   draw();
+  registerDevice();
+  syncQueue();
 }
 
 async function loadSub() {
@@ -367,9 +611,14 @@ function fatal(e) {
 
 /* ===== Structure générale ===== */
 function banner() {
+  return pendingBanner() + subBanner();
+}
+function subBanner() {
   if (S.offline) {
     const d = new Date(S.cachedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    return `<div class="banner">Hors ligne. Catalogue enregistré le ${esc(d)} : consultation seulement, le stock peut avoir changé. Les ventes reviendront avec la connexion.</div>`;
+    return offlineRight()
+      ? `<div class="banner">Hors ligne. Les ventes sont gardées sur ce téléphone et partiront toutes seules au retour du réseau. Catalogue du ${esc(d)} : le stock peut avoir changé.</div>`
+      : `<div class="banner">Hors ligne. Catalogue enregistré le ${esc(d)} : consultation seulement, le stock peut avoir changé. Les ventes reviendront avec la connexion.</div>`;
   }
   const s = S.sub || {};
   // Les dates de l'abonnement ne concernent que le propriétaire. Les employés voient seulement
@@ -392,7 +641,7 @@ function draw() {
   else {
     tabs.push(['history','Historique']);
     if (isManager()) tabs.push(['report','Bilan']);
-    if (S.role === 'owner') tabs.push(['team','Équipe']);
+    if (S.role === 'owner') tabs.push(['team', S.alertCount ? `Équipe (${S.alertCount})` : 'Équipe']);
   }
   const multi = S.memberships.length > 1;
   $('#app').innerHTML = `
@@ -410,7 +659,7 @@ function draw() {
     <main id="view"></main>
     <nav class="tabs" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k?'aria-current="page"':''}>${l}</button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
-  $('#logout').onclick = () => leave();
+  $('#logout').onclick = askLeave;
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; draw(); });
   ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam })[S.tab]();
@@ -425,7 +674,7 @@ function cartTotal() {
 
 function viewSale() {
   $('#view').innerHTML = `
-    ${S.last ? `<section class="card"><div class="row" style="align-items:center"><div>Vente enregistrée : <b class="num">${esc(money(S.last.total))}</b></div>
+    ${S.last ? `<section class="card"><div class="row" style="align-items:center"><div>${S.last.rec ? 'Vente gardée (hors ligne)' : 'Vente enregistrée'} : <b class="num">${esc(money(S.last.total))}</b></div>
       <button class="btn small" id="last-inv" style="flex:0 0 auto">Facture</button><button class="btn ghost small" id="last-x" style="flex:0 0 auto">OK</button></div></section>` : ''}
     <section class="card stack">
       <h2>Nouvelle vente</h2>
@@ -443,7 +692,7 @@ function viewSale() {
     if (hit) { addToCart(hit.id); S.q = ''; q.value = ''; drawProducts(); }
     else toast('Aucun produit avec ce code.', true);
   };
-  const li = $('#last-inv'); if (li) li.onclick = () => openInvoice(S.last.id);
+  const li = $('#last-inv'); if (li) li.onclick = () => S.last.rec ? openInvoice(recToSale(S.last.rec)) : openInvoice(S.last.id);
   const lx = $('#last-x'); if (lx) lx.onclick = () => { S.last = null; viewSale(); };
   drawProducts(); drawCart();
 }
@@ -452,7 +701,7 @@ function drawProducts() {
   const t = S.q.trim().toLowerCase();
   const list = S.products.filter(p => !t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t).slice(0, 60);
   $('#plist').innerHTML = list.length ? list.map(p => `
-    <button class="prod" data-add="${esc(p.id)}" ${Number(p.stock_qty) <= 0 ? 'disabled' : ''}>
+    <button class="prod" data-add="${esc(p.id)}" ${Number(p.stock_qty) <= 0 && !S.offline ? 'disabled' : ''}>
       <span><span class="nm">${esc(p.name)}</span><br><span class="sub">${qty(p.stock_qty)} ${esc(UNITS[p.unit])} en stock</span></span>
       <span class="pr">${money(p.sell_price)}</span>
     </button>`).join('') : '<p class="empty">Aucun produit trouvé.</p>';
@@ -462,7 +711,10 @@ function drawProducts() {
 function addToCart(id) {
   const p = S.products.find(x => x.id === id); if (!p) return;
   const cur = S.cart.get(id) || 0;
-  if (cur + 1 > Number(p.stock_qty)) return toast('Stock insuffisant : ' + p.name, true);
+  if (cur + 1 > Number(p.stock_qty)) {
+    if (!S.offline) return toast('Stock insuffisant : ' + p.name, true);
+    toast('Attention : stock peut-être insuffisant pour ' + p.name + ' (à vérifier).', true);
+  }
   S.cart.set(id, cur + 1);
   drawCart();
 }
@@ -486,7 +738,7 @@ function drawCart() {
       <label>Paiement<select id="pay">${Object.entries(PAY).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
     </div>
     <label>Nom du client (obligatoire si paiement partiel)<input id="cust" maxlength="100" autocomplete="off"></label>
-    <div class="row"><button class="btn" id="validate" ${canWrite() ? '' : 'disabled'}>Valider la vente</button>
+    <div class="row"><button class="btn" id="validate" ${canWrite() || canSellOffline() ? '' : 'disabled'}>${S.offline ? 'Valider (hors ligne)' : 'Valider la vente'}</button>
       <button class="btn ghost" id="clear">Vider</button></div>`;
   el.querySelectorAll('[data-qty]').forEach(i => i.onchange = () => {
     const v = Number(i.value);
@@ -504,12 +756,17 @@ async function submitSale() {
   const total = cartTotal();
   const paidRaw = $('#paid').value.trim();
   const paid = paidRaw === '' ? total : Math.round(Number(paidRaw));
+  const pay = $('#pay').value, customer = $('#cust').value.trim() || null;
+  if (S.offline) { S.busy = false; return queueSale(total, paid, pay, customer); }
   const items = [...S.cart].map(([product_id, quantity]) => ({ product_id, quantity }));
   const { data: newSale, error } = await sb.rpc('create_sale', {
     p_shop: S.shop.id, p_items: items, p_paid: paid,
-    p_payment_method: $('#pay').value, p_customer: $('#cust').value.trim() || null, p_client_ref: S.ref
+    p_payment_method: pay, p_customer: customer, p_client_ref: S.ref
   });
   S.busy = false;
+  // Réseau coupé pendant l'envoi : si la vente hors ligne est permise, elle part dans la file
+  // avec la MÊME référence. Si le serveur l'avait déjà reçue, il ne la comptera pas deux fois.
+  if (error && isNetErr(error) && offlineRight()) return queueSale(total, paid, pay, customer);
   if (error) { toast(cleanErr(error), true); return drawCart(); }
   S.cart.clear(); S.ref = uuid(); S.sales = null; S.summary = null; S.last = newSale ? { id: newSale, total } : null;
   toast('Vente enregistrée : ' + money(total));
@@ -595,7 +852,7 @@ function openSheet(kind, pid) {
 function closeSheet() { $('#sheet-host').innerHTML = ''; }
 
 /* ===== Onglet Historique ===== */
-const SALE_COLS = 'id,invoice_no,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
+const SALE_COLS = 'id,invoice_no,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
 async function viewHistory() {
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
   if (!S.sales) {
@@ -606,16 +863,23 @@ async function viewHistory() {
     S.sales = data || [];
   }
   await ensureNames();   // propriétaire / gérant : noms des vendeurs (la base ne les leur donne qu'à eux)
-  $('#view').innerHTML = `<section class="stack"><h2>${isManager() ? 'Dernières ventes' : 'Mes dernières ventes'}</h2>
+  const waiting = myQueue();
+  $('#view').innerHTML = `${waiting.length ? `<section class="card stack"><h2>En attente d'envoi (${waiting.length})</h2>
+      ${waiting.map(r => `<div class="row" style="align-items:baseline"><b class="num">${money(r.total)}</b><span class="muted">${esc(r.offline_ref)}</span>
+        <span class="muted" style="text-align:right">${dt(r.created_at)}</span></div>${r.error ? `<div class="muted" style="color:var(--bad)">${esc(r.error)}</div>` : ''}`).join('')}
+      <button class="btn ghost small" id="sync-now">Envoyer maintenant</button></section>` : ''}
+    <section class="stack"><h2>${isManager() ? 'Dernières ventes' : 'Mes dernières ventes'}</h2>
     ${S.sales.map(s => `<article class="sale ${s.status === 'cancelled' ? 'cancelled' : ''}">
       <div class="row" style="align-items:baseline"><b class="num">${money(s.total)}</b><span class="muted" style="flex:0 0 auto">${esc(invNo(s.invoice_no))}</span>
         <span class="muted" style="text-align:right">${dt(s.created_at)} · ${esc(PAY[s.payment_method])}</span></div>
       ${isManager() ? `<div class="muted">Vendu par ${esc((S.names && S.names[s.created_by]) || 'compte supprimé')}</div>` : ''}
+      ${s.offline ? `<div class="muted"><span class="tag warn">Hors ligne</span> réf. ${esc(s.offline_ref)}${s.client_created_at ? ' · faite à ' + dt(s.client_created_at) : ' · heure du téléphone inconnue'}</div>` : ''}
       <ul>${(s.sale_items || []).map(i => `<li>${qty(i.quantity)} ${esc(UNITS[i.products?.unit] || '')} ${esc(i.products?.name)} · ${money(i.line_total)}</li>`).join('')}</ul>
       <div>${s.status === 'cancelled' ? `<span class="tag bad">Annulée</span> <span class="muted">${esc(s.cancel_reason)}</span>` : ''}
         ${s.status !== 'cancelled' && s.paid < s.total ? `<span class="tag warn">Crédit : reste ${money(s.total - s.paid)}</span> <span class="muted">${esc(s.customer_name)}</span>` : ''}</div>
       ${s.status !== 'cancelled' ? `<div class="seg"><button class="btn ghost small" data-inv="${esc(s.id)}">Facture</button>${isManager() ? `<button class="btn ghost small" data-cancel="${esc(s.id)}" ${canWrite() ? '' : 'disabled'}>Annuler cette vente</button>` : ''}</div>` : ''}
     </article>`).join('') || '<p class="empty">Aucune vente pour le moment.</p>'}</section>`;
+  const sn = $('#sync-now'); if (sn) sn.onclick = async () => { await syncQueue(true); S.sales = null; viewHistory(); };
   document.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => cancelDialog(b.dataset.cancel));
   document.querySelectorAll('[data-inv]').forEach(b => b.onclick = () => openInvoice(S.sales.find(x => x.id === b.dataset.inv)));
 }
@@ -703,6 +967,8 @@ async function viewTeam() {
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
   try {
     if (!S.team) S.team = (await callTeam({ action: 'list_members' })).members;
+    await ensureNames();
+    if (!S.offAllowed || !S.alerts) await loadOfflineAdmin();
   } catch (e) { $('#view').innerHTML = ''; return toast(e.message, true); }
   $('#view').innerHTML = `
     <section class="card stack">
@@ -727,10 +993,12 @@ async function viewTeam() {
             <div style="margin-top:4px">${m.active ? '<span class="tag">Actif</span>' : '<span class="tag bad">Désactivé</span>'}</div>
             ${m.role !== 'owner' ? `<div class="seg" style="margin-top:8px">
               <button class="btn ghost small" data-pw="${esc(m.user_id)}" ${canWrite() ? '' : 'disabled'}>Nouveau mot de passe</button>
-              <button class="btn ghost small" data-act="${esc(m.user_id)}" data-to="${m.active ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${m.active ? 'Désactiver' : 'Réactiver'}</button></div>` : ''}
+              <button class="btn ghost small" data-act="${esc(m.user_id)}" data-to="${m.active ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${m.active ? 'Désactiver' : 'Réactiver'}</button>
+              <button class="btn ${S.offAllowed[m.user_id] ? '' : 'ghost'} small" data-off="${esc(m.user_id)}" data-to="${S.offAllowed[m.user_id] ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${S.offAllowed[m.user_id] ? 'Hors ligne : autorisé' : 'Hors ligne : non autorisé'}</button></div>` : ''}
           </div>
         </div>`).join('')}</div>
-    </section>`;
+    </section>${offlineAdminHtml()}`;
+  bindOfflineAdmin();
   $('#addm').onclick = openAddMember;
   $('#editshop').onclick = openShopProfile;
   document.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => openResetPassword(b.dataset.pw));
@@ -908,8 +1176,9 @@ function invoicePdf(inv) {
       if (inv.shop.address) { pdf.text(L, y, inv.shop.address, { size: 10, color: GREY }); y += 14; }
       if (inv.shop.phone) { pdf.text(L, y, 'Tél. : ' + inv.shop.phone, { size: 10, color: GREY }); y += 14; }
       pdf.text(R, 62, 'FACTURE', { size: 20, bold: true, align: 'right' });
-      pdf.text(R, 80, 'N° ' + invNo(inv.no), { size: 11, bold: true, align: 'right' });
+      pdf.text(R, 80, 'N° ' + inv.num, { size: 11, bold: true, align: 'right' });
       pdf.text(R, 94, dtFull(inv.date), { size: 10, align: 'right', color: GREY });
+      if (inv.ref2) pdf.text(R, 108, 'Réf. hors ligne : ' + inv.ref2, { size: 9, align: 'right', color: GREY });
       const ly = Math.max(y, 108) + 4;
       pdf.line(L, R, ly, GREEN, 1.2);
       let iy = ly + 22;
@@ -918,7 +1187,7 @@ function invoicePdf(inv) {
       pdf.text(L, iy, 'Paiement : ' + inv.pay, { size: 10 });
       top = iy + 26;
     } else {
-      pdf.text(L, 50, inv.shop.name + ' : facture ' + invNo(inv.no) + ' (suite)', { size: 10, bold: true, color: GREY });
+      pdf.text(L, 50, inv.shop.name + ' : facture ' + inv.num + ' (suite)', { size: 10, bold: true, color: GREY });
       top = 80;
     }
     pdf.rect(L, top, R - L, 22, [0.92, 0.95, 0.93]);
@@ -955,12 +1224,12 @@ function invoicePdf(inv) {
   }
   if (inv.shop.footer) pdf.text(pdf.W / 2, 790, inv.shop.footer, { size: 10, align: 'center', color: GREY });
   pdf.text(pdf.W / 2, 815, 'Établi avec Bara Gestion', { size: 7.5, align: 'center', color: [0.6, 0.64, 0.61] });
-  return pdf.build('Facture ' + invNo(inv.no));
+  return pdf.build('Facture ' + inv.num);
 }
 
 function invoiceText(inv) {
   const rows = inv.lines.map(l => `- ${plainQty(l.qty)}${l.unit ? ' ' + l.unit : ''} ${l.name} : ${plainMoney(l.total)} FCFA`);
-  return [`${inv.shop.name}`, `Facture ${invNo(inv.no)} du ${dtFull(inv.date)}`, ...rows, `Total : ${plainMoney(inv.total)} FCFA`,
+  return [`${inv.shop.name}`, `Facture ${inv.num} du ${dtFull(inv.date)}`, ...(inv.ref2 ? [`Réf. hors ligne : ${inv.ref2}`] : []), ...rows, `Total : ${plainMoney(inv.total)} FCFA`,
     ...(inv.paid < inv.total ? [`Reste à payer : ${plainMoney(inv.total - inv.paid)} FCFA`] : []),
     ...(inv.shop.footer ? ['', inv.shop.footer] : [])].join('\n');
 }
@@ -985,7 +1254,8 @@ async function buildInvoice(s) {
   const seller = s.created_by === S.user.id ? S.shop.who : ((S.names && S.names[s.created_by]) || '');
   return {
     shop: { name: S.shop.name, phone: S.shop.phone || '', address: S.shop.address || '', footer: S.shop.footer || '' },
-    no: s.invoice_no, date: s.created_at, seller, customer: s.customer_name || '', pay: PAY[s.payment_method] || '',
+    no: s.invoice_no, num: s.invoice_no ? invNo(s.invoice_no) : s.offline_ref, ref2: s.invoice_no && s.offline_ref ? s.offline_ref : '',
+    date: s.client_created_at || s.created_at, seller, customer: s.customer_name || '', pay: PAY[s.payment_method] || '',
     lines: (s.sale_items || []).map(i => ({ name: i.products?.name || 'Produit', unit: UNITS[i.products?.unit] || '',
       qty: i.quantity, price: i.unit_price, total: i.line_total })),
     total: s.total, paid: s.paid
@@ -995,18 +1265,18 @@ async function buildInvoice(s) {
 function downloadInvoice(inv) {
   const url = URL.createObjectURL(new Blob([invoicePdf(inv)], { type: 'application/pdf' }));
   const a = document.createElement('a');
-  a.href = url; a.download = `Facture-${invNo(inv.no)}.pdf`;
+  a.href = url; a.download = `Facture-${inv.num}.pdf`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 15000);
 }
 
 async function shareInvoice(inv) {
-  const name = `Facture-${invNo(inv.no)}.pdf`;
+  const name = `Facture-${inv.num}.pdf`;
   const text = invoiceText(inv);
   try {
     const file = new File([invoicePdf(inv)], name, { type: 'application/pdf' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: `Facture ${invNo(inv.no)}`, text: `${inv.shop.name} : facture ${invNo(inv.no)}` });
+      await navigator.share({ files: [file], title: `Facture ${inv.num}`, text: `${inv.shop.name} : facture ${inv.num}` });
       return;
     }
   } catch (e) {
@@ -1023,11 +1293,12 @@ async function openInvoice(saleOrId) {
   catch (e) { return toast(e.message, true); }
   const incomplete = !inv.shop.phone && !inv.shop.address;
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Facture">
-    <h2>Facture ${esc(invNo(inv.no))}</h2>
+    <h2>Facture ${esc(inv.num)}</h2>
     <div class="card" style="display:grid;gap:4px">
       <div><b>${esc(inv.shop.name)}</b></div>
       ${inv.shop.address ? `<div class="muted">${esc(inv.shop.address)}</div>` : ''}${inv.shop.phone ? `<div class="muted">Tél. ${esc(inv.shop.phone)}</div>` : ''}
       <div class="muted">${esc(dtFull(inv.date))}${inv.seller ? ' · ' + esc(inv.seller) : ''}</div>
+      ${inv.ref2 ? `<div class="muted">Réf. hors ligne : ${esc(inv.ref2)}</div>` : ''}
       ${inv.customer ? `<div>Client : <b>${esc(inv.customer)}</b></div>` : ''}
       <ul style="margin:6px 0 0;padding-left:18px">${inv.lines.map(l => `<li>${esc(plainQty(l.qty))} ${esc(l.unit)} ${esc(l.name)} · ${esc(money(l.total))}</li>`).join('')}</ul>
       <div class="total" style="margin-top:6px"><span>Total</span><span class="num">${esc(money(inv.total))}</span></div>
