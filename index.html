@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Bara Gestion version 2026-10-23b : ventes hors ligne (étape 3) + contrôle des prix -->
+<!-- Bara Gestion version 2026-10-24 : modification des produits -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -156,6 +156,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
+const APP_VERSION = '2026-10-24';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -536,6 +537,7 @@ function drawLogin(msg) {
       <label>Mot de passe<input id="password" type="password" autocomplete="current-password" required></label>
       ${msg ? `<div class="banner bad" role="alert">${esc(msg)}</div>` : ''}
       <button class="btn" id="login-btn" type="submit">Se connecter</button>
+      <p class="muted" style="text-align:center;font-size:12px;margin:0">Version ${APP_VERSION}</p>
     </form>`;
   $('#login-form').addEventListener('submit', async ev => {
     ev.preventDefault();
@@ -814,11 +816,12 @@ function viewProducts() {
           <div style="min-width:0"><div class="nm">${esc(p.name)}</div>
             <div class="sub">${esc(p.category)} · ${qty(p.stock_qty)} ${esc(UNITS[p.unit])} ${low ? '<span class="tag warn">Stock bas</span>' : ''}</div>
             ${isManager() && S.costs[p.id] != null ? `<div class="sub">Achat ${money(S.costs[p.id])}</div>` : ''}
-            ${isManager() ? `<div class="seg" style="margin-top:6px"><button class="btn ghost small" data-recv="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Réception</button><button class="btn ghost small" data-adj="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Ajuster</button></div>` : ''}</div>
+            ${isManager() ? `<div class="seg" style="margin-top:6px"><button class="btn ghost small" data-edit="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Modifier</button><button class="btn ghost small" data-recv="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Réception</button><button class="btn ghost small" data-adj="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Ajuster</button></div>` : ''}</div>
           <div class="pr num">${money(p.sell_price)}</div></div>`;
       }).join('') || '<p class="empty">Aucun produit.</p>'}</div>
     </section>`;
   const n = $('#newp'); if (n) n.onclick = () => openSheet('new');
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openSheet('edit', b.dataset.edit));
   document.querySelectorAll('[data-recv]').forEach(b => b.onclick = () => openSheet('recv', b.dataset.recv));
   document.querySelectorAll('[data-adj]').forEach(b => b.onclick = () => openSheet('adj', b.dataset.adj));
 }
@@ -836,6 +839,16 @@ function openSheet(kind, pid) {
       <div class="row"><label>Quantité en stock<input id="f-qty" type="number" inputmode="decimal" min="0" step="any" value="0"></label>
         <label>Alerte stock bas<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="0"></label></div>
       <label>Code-barres (facultatif)<input id="f-code" maxlength="32" autocomplete="off"></label>`;
+  } else if (kind === 'edit') {
+    title = 'Modifier : ' + p.name;
+    body = `<label>Nom<input id="f-name" maxlength="120" required value="${esc(p.name)}"></label>
+      <label>Catégorie<input id="f-cat" maxlength="60" value="${esc(p.category)}"></label>
+      <div class="row"><label>Prix d'achat (FCFA)<input id="f-buy" type="number" inputmode="numeric" min="0" step="1" required value="${esc(S.costs[p.id] ?? '')}"></label>
+        <label>Prix de vente (FCFA)<input id="f-sell" type="number" inputmode="numeric" min="0" step="1" required value="${esc(p.sell_price)}"></label></div>
+      <label>Alerte stock bas<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="${esc(p.alert_threshold)}"></label>
+      <label>Code-barres (facultatif)<input id="f-code" maxlength="32" autocomplete="off" value="${esc(p.barcode || '')}"></label>
+      <p class="muted" style="margin:0;font-size:13px">Le nouveau prix s'applique aux prochaines ventes. Les ventes déjà faites gardent leur prix. Chaque changement de prix est noté dans le journal. Pour changer la quantité, utilisez « Réception » ou « Ajuster ».</p>
+      <div style="display:flex;align-items:center;gap:10px"><input id="f-off" type="checkbox" style="width:22px;height:22px;flex:0 0 auto;margin:0"><span style="font-size:14px" onclick="document.getElementById('f-off').click()">Retirer ce produit de la vente (il reste dans l'historique)</span></div>`;
   } else if (kind === 'recv') {
     title = 'Réception : ' + p.name;
     body = `<div class="row"><label>Quantité reçue<input id="f-qty" type="number" inputmode="decimal" min="0" step="any" required></label>
@@ -863,6 +876,15 @@ function openSheet(kind, pid) {
         p_shop: S.shop.id, p_name: $('#f-name').value, p_category: $('#f-cat').value, p_unit: $('#f-unit').value,
         p_buy_price: Math.round(num('f-buy')), p_sell_price: Math.round(num('f-sell')),
         p_initial_qty: num('f-qty'), p_alert: num('f-alert'), p_barcode: $('#f-code').value.trim() || null });
+    } else if (kind === 'edit') {
+      const sell = Math.round(num('f-sell')), buy = Math.round(num('f-buy'));
+      if (!($('#f-sell').value !== '' && sell >= 0) || !($('#f-buy').value !== '' && buy >= 0)) {
+        btn.disabled = false; return toast('Prix invalide.', true);
+      }
+      res = await sb.rpc('update_product', {
+        p_product: pid, p_name: $('#f-name').value.trim(), p_category: $('#f-cat').value, p_sell_price: sell,
+        p_buy_price: buy, p_alert: num('f-alert'), p_active: $('#f-off').checked ? false : null,
+        p_barcode: $('#f-code').value.trim() || null });
     } else if (kind === 'recv') {
       res = await sb.rpc('receive_stock', {
         p_shop: S.shop.id, p_product: pid, p_qty: num('f-qty'), p_unit_cost: Math.round(num('f-cost')),
@@ -1007,7 +1029,7 @@ async function viewTeam() {
         <div>${S.shop.address ? esc(S.shop.address) : 'Adresse : non renseignée'}</div>
         <div>${S.shop.phone ? 'Tél. ' + esc(S.shop.phone) : 'Téléphone : non renseigné'}</div>
         <div>${S.shop.footer ? esc(S.shop.footer) : 'Phrase de bas de page : non renseignée'}</div></div>
-      <p class="muted" style="margin:0;font-size:12.5px">Imprimée sur chaque facture.</p>
+      <p class="muted" style="margin:0;font-size:12.5px">Imprimée sur chaque facture. · Application version ${APP_VERSION}</p>
     </section>
     <section class="card stack">
       <div class="row"><h2 style="flex:1 1 auto">Équipe (${S.team.length})</h2>
