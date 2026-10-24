@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Bara Gestion version 2026-10-23 : ventes hors ligne (étape 3) -->
+<!-- Bara Gestion version 2026-10-23b : ventes hors ligne (étape 3) + contrôle des prix -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -382,6 +382,18 @@ async function registerDevice() {
   } catch (e) {}
 }
 
+// Propriétaire : nouvelles alertes vérifiées toutes les 30 s (le nombre s'affiche sur l'onglet Équipe).
+async function refreshAlerts() {
+  if (S.role !== 'owner' || S.offline || !S.shop) return;
+  const before = S.alertCount;
+  await loadAlertCount();
+  if (S.alertCount !== before) {
+    S.alerts = null;
+    const b = document.querySelector('[data-tab=team]');
+    if (b) b.textContent = S.alertCount ? `Équipe (${S.alertCount})` : 'Équipe';
+    if (S.alertCount > before) toast('Nouvelle alerte : voir l\'onglet Équipe.');
+  }
+}
 async function loadAlertCount() {
   if (S.role !== 'owner') return;
   try {
@@ -512,7 +524,7 @@ async function checkSession() {
   S.checking = false;
 }
 function startGuard() {
-  setInterval(() => { checkSession(); syncQueue(); }, 30000);
+  setInterval(() => { checkSession(); syncQueue(); refreshAlerts(); }, 30000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkSession(); });
 }
 
@@ -759,6 +771,21 @@ async function submitSale() {
   const paid = paidRaw === '' ? total : Math.round(Number(paidRaw));
   const pay = $('#pay').value, customer = $('#cust').value.trim() || null;
   if (S.offline) { S.busy = false; return queueSale(total, paid, pay, customer); }
+  // Le propriétaire a peut-être changé un prix depuis l'ouverture de l'écran : on vérifie AVANT
+  // d'encaisser, pour que le total affiché soit toujours le vrai total.
+  try {
+    const { data: fresh, error: fe } = await sb.from('products').select('id,name,sell_price')
+      .eq('shop_id', S.shop.id).in('id', [...S.cart.keys()]);
+    if (!fe && fresh) {
+      const changed = fresh.filter(f => { const p = S.products.find(x => x.id === f.id); return p && Number(p.sell_price) !== Number(f.sell_price); });
+      if (changed.length) {
+        changed.forEach(f => { S.products.find(x => x.id === f.id).sell_price = f.sell_price; });
+        S.busy = false; drawCart(); saveCache();
+        return toast('Prix modifié par le propriétaire : ' + changed.map(f => f.name + ' = ' + money(f.sell_price)).join(', ') +
+          '. Vérifiez le nouveau total puis validez à nouveau.', true);
+      }
+    }
+  } catch (e) { /* réseau coupé : la suite s'en occupe */ }
   const items = [...S.cart].map(([product_id, quantity]) => ({ product_id, quantity }));
   const { data: newSale, error } = await sb.rpc('create_sale', {
     p_shop: S.shop.id, p_items: items, p_paid: paid,
