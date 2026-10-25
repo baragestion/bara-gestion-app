@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Bara Gestion version 2026-10-25d : scan par la caméra -->
+<!-- Bara Gestion version 2026-10-25e : comptage de stock -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -156,7 +156,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-25d';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-25e';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -182,7 +182,7 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, disc: 0, discMap: null, alertCount: 0, alerts: null, devices: null, offAllowed: null
+  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, count: null, countPending: false, disc: 0, discMap: null, alertCount: 0, alerts: null, devices: null, offAllowed: null
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
@@ -435,6 +435,7 @@ const ALERT_TEXT = {
   device_new: (a, who) => `Nouveau téléphone ou données effacées pour ${who} (code ${a.details.code}). Normal s'il a changé de téléphone, à vérifier sinon.`,
   offline_not_allowed: (a, who) => `${who} a vendu hors ligne sans autorisation (réf. ${a.details.ref}). La vente a été gardée.`,
   discount_over: (a, who) => `Remise au-dessus du maximum par ${who} (réf. ${a.details.ref}) : ${money(a.details.discount)} sur ${money(a.details.subtotal)}, maximum ${a.details.max_pct} %.`,
+  count_gap: (a, who) => `Grand écart au comptage : ${a.details.product}, attendu ${qty(a.details.expected)}, compté ${qty(a.details.counted)} (${money(a.details.value)}). Comptage de ${who}.`,
   clock: (a, who) => `Heure incorrecte sur le téléphone de ${who} pour la vente ${a.details.ref}.`
 };
 
@@ -616,7 +617,7 @@ async function selectShop(id) {
   storage.setItem('bg_shop', id);
   S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
-  await Promise.all([loadProducts(), loadSub(), loadAlertCount()]);
+  await Promise.all([loadProducts(), loadSub(), loadAlertCount(), loadCountState()]);
   draw();
   registerDevice();
   syncQueue();
@@ -675,6 +676,7 @@ function subBanner() {
 
 function draw() {
   const tabs = [['sale','Vente'], ['products','Produits']];
+  if (S.tab === 'count' && !isManager()) S.tab = 'products';
   if (S.offline) { if (!['sale', 'products'].includes(S.tab)) S.tab = 'sale'; }   // le reste demande internet
   else {
     tabs.push(['history','Historique']);
@@ -695,12 +697,12 @@ function draw() {
       ${banner()}
     </header>
     <main id="view"></main>
-    <nav class="tabs" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k?'aria-current="page"':''}>${l}</button>`).join('')}</nav>
+    <nav class="tabs" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k || (S.tab==='count' && k==='products')?'aria-current="page"':''}>${l}</button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
   $('#logout').onclick = askLeave;
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { stopScan(); S.tab = b.dataset.tab; draw(); });
-  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam })[S.tab]();
+  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount })[S.tab]();
 }
 
 /* ===== Onglet Vente ===== */
@@ -863,10 +865,10 @@ async function submitSale() {
 
 /* ===== Onglet Produits ===== */
 function viewProducts() {
-  $('#view').innerHTML = `
+  $('#view').innerHTML = `${S.countPending === 'submitted' && S.role === 'owner' ? '<div class="banner">Un comptage du gérant attend votre validation : touchez « Comptage ».</div>' : S.countPending === 'open' ? '<div class="banner">Un comptage est en cours : touchez « Comptage » pour le continuer.</div>' : ''}
     <section class="card stack">
       <div class="row"><h2 style="flex:1 1 auto">Produits (${S.products.length})</h2>
-        ${isManager() ? `<button class="btn ghost small" id="labels" style="flex:0 0 auto">Étiquettes</button><button class="btn small" id="newp" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau produit</button>` : ''}</div>
+        ${isManager() ? `<button class="btn ghost small" id="labels" style="flex:0 0 auto">Étiquettes</button><button class="btn ghost small" id="count" style="flex:0 0 auto" ${S.offline ? 'disabled' : ''}>Comptage</button><button class="btn small" id="newp" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau produit</button>` : ''}</div>
       <div class="plist">${S.products.map(p => {
         const low = Number(p.stock_qty) <= Number(p.alert_threshold);
         return `<div class="prod">
@@ -880,6 +882,7 @@ function viewProducts() {
     </section>`;
   const n = $('#newp'); if (n) n.onclick = () => openSheet('new');
   const lb = $('#labels'); if (lb) lb.onclick = openLabels;
+  const ct = $('#count'); if (ct) ct.onclick = () => { S.tab = 'count'; draw(); };
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openSheet('edit', b.dataset.edit));
   document.querySelectorAll('[data-recv]').forEach(b => b.onclick = () => openSheet('recv', b.dataset.recv));
   document.querySelectorAll('[data-adj]').forEach(b => b.onclick = () => openSheet('adj', b.dataset.adj));
@@ -989,6 +992,208 @@ function openSheet(kind, pid) {
   const first = $('#sheet input'); if (first) first.focus();
 }
 function closeSheet() { $('#sheet-host').innerHTML = ''; stopScan(); }
+
+/* ===== Comptage de stock (propriétaire et gérant, en ligne uniquement) =====
+   Chaque quantité saisie est enregistrée tout de suite dans la base, avec le stock attendu à
+   ce moment-là. Le gérant ne voit pas la quantité attendue (comptage « à l'aveugle ») et
+   envoie son comptage au propriétaire, qui valide. */
+async function loadCountState() {
+  S.countPending = false;
+  if (!isManager() || S.offline) return;
+  try {
+    const { data } = await sb.from('stock_counts').select('id,status').eq('shop_id', S.shop.id).in('status', ['open', 'submitted']).limit(1);
+    S.countPending = !!(data && data[0] && (data[0].status === 'submitted' ? S.role === 'owner' : true)) && data[0].status;
+  } catch (e) {}
+}
+
+async function viewCount() {
+  stopScan();
+  if (S.offline) { $('#view').innerHTML = '<div class="banner bad">Le comptage demande une connexion internet.</div>'; return; }
+  $('#view').innerHTML = '<p class="empty">Chargement…</p>';
+  const [act, past] = await Promise.all([
+    sb.from('stock_counts').select('*').eq('shop_id', S.shop.id).in('status', ['open', 'submitted']).limit(1),
+    sb.from('stock_counts').select('*').eq('shop_id', S.shop.id).in('status', ['applied', 'cancelled']).order('created_at', { ascending: false }).limit(8)]);
+  if (act.error || past.error) { $('#view').innerHTML = ''; return toast(cleanErr(act.error || past.error), true); }
+  await ensureNames();
+  const c = (act.data || [])[0];
+  if (!c) return countStartScreen(past.data || []);
+  const { data: lines, error } = await sb.from('stock_count_lines').select('product_id,expected,counted').eq('count_id', c.id);
+  if (error) { $('#view').innerHTML = ''; return toast(cleanErr(error), true); }
+  S.count = { c, lines: {} };
+  (lines || []).forEach(l => { S.count.lines[l.product_id] = { counted: Number(l.counted), expected: Number(l.expected) }; });
+  if (c.status === 'submitted') return S.role === 'owner' ? countReview() : countWaiting();
+  countEntryScreen();
+}
+
+function countStartScreen(past) {
+  const cats = [...new Set(S.products.map(p => p.category))].sort();
+  const who = id => esc((S.names && S.names[id]) || '');
+  $('#view').innerHTML = `
+    <section class="card stack">
+      <h2>Comptage de stock</h2>
+      <p class="muted" style="margin:0;font-size:13.5px">Comptez ce qu'il y a vraiment en rayon. L'application compare avec son stock et montre les écarts. ${S.role === 'owner' ? '' : 'Votre comptage sera validé par le propriétaire.'}</p>
+      <label>Que compter ?<select id="ct-cat"><option value="">Toute la boutique (${S.products.length} produits)</option>
+        ${cats.map(k => `<option value="${esc(k)}">${esc(k)} (${S.products.filter(p => p.category === k).length})</option>`).join('')}</select></label>
+      <button class="btn" id="ct-start" ${canWrite() ? '' : 'disabled'}>Démarrer le comptage</button>
+      <button class="btn ghost" id="ct-back">Retour aux produits</button>
+    </section>
+    ${S.role === 'owner' ? `<section class="card stack"><h3 style="margin:0">Alerte de grand écart</h3>
+      <form id="ct-thr" class="row" style="align-items:flex-end"><label>Prévenir si un écart dépasse (FCFA)<input id="ct-thr-v" type="number" min="0" step="500" value="10000"></label>
+      <button class="btn ghost small" type="submit" style="flex:0 0 auto">Enregistrer</button></form></section>` : ''}
+    <section class="card stack"><h3 style="margin:0">Comptages précédents</h3>
+      ${past.length ? past.map(x => `<div class="row muted" style="font-size:13.5px"><span>${dt(x.created_at)} · ${esc(x.category || 'toute la boutique')} · ${who(x.created_by)}</span>
+        <span style="text-align:right">${x.status === 'cancelled' ? 'annulé' : `${x.loss_value ? `<b style="color:var(--bad)">−${money(x.loss_value)}</b>` : ''} ${x.gain_value ? `+${money(x.gain_value)}` : ''}${!x.loss_value && !x.gain_value ? 'aucun écart' : ''}`}</span></div>`).join('')
+        : '<p class="muted" style="margin:0">Aucun comptage pour le moment.</p>'}</section>`;
+  $('#ct-back').onclick = () => { S.tab = 'products'; draw(); };
+  $('#ct-start').onclick = async () => {
+    const { error } = await sb.rpc('start_stock_count', { p_shop: S.shop.id, p_category: $('#ct-cat').value || null });
+    if (error) return toast(cleanErr(error), true);
+    viewCount();
+  };
+  const thr = $('#ct-thr');
+  if (thr) thr.onsubmit = async ev => {
+    ev.preventDefault();
+    const { error } = await sb.rpc('set_count_alert_threshold', { p_shop: S.shop.id, p_amount: Math.round(Number($('#ct-thr-v').value) || 0) });
+    if (error) return toast(cleanErr(error), true);
+    toast('Seuil enregistré.');
+  };
+}
+
+function countProducts() {
+  const cat = S.count.c.category;
+  return S.products.filter(p => !cat || p.category === cat);
+}
+
+function countEntryScreen() {
+  const c = S.count.c, list = countProducts();
+  const done = list.filter(p => S.count.lines[p.id]).length;
+  const owner = S.role === 'owner';
+  $('#view').innerHTML = `
+    <section class="card stack">
+      <h2>Comptage en cours</h2>
+      <div class="muted" style="font-size:13.5px">${esc(c.category || 'Toute la boutique')} · démarré le ${dt(c.created_at)} · <b id="ct-done">${done}</b> / ${list.length} produits comptés</div>
+      ${owner ? '' : '<div class="muted" style="font-size:13px">Comptez sans regarder l\'écran du stock : tapez seulement ce que vous voyez.</div>'}
+      <div class="row" style="align-items:flex-end;flex-wrap:nowrap">
+        <label style="flex:1 1 auto">Chercher un produit<input id="ct-q" type="search" autocomplete="off" placeholder="Nom ou code"></label>
+        ${canScan() ? '<button class="btn small" type="button" id="ct-scan" style="flex:0 0 auto;margin-bottom:2px">📷 Scanner</button>' : ''}</div>
+    </section>
+    <section class="card stack"><div class="plist" id="ct-list"></div></section>
+    <section class="card stack">
+      ${owner ? `<button class="btn" id="ct-review">Voir les écarts et valider</button>` : `<button class="btn" id="ct-submit">Terminer et envoyer au propriétaire</button>`}
+      <div class="row"><button class="btn ghost" id="ct-back">Retour aux produits</button>
+        <button class="btn ghost" id="ct-cancel" style="color:var(--bad)">Annuler le comptage</button></div>
+    </section>`;
+  const drawList = () => {
+    const t = ($('#ct-q').value || '').trim().toLowerCase();
+    const rows = list.filter(p => !t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t);
+    $('#ct-list').innerHTML = rows.map(p => {
+      const l = S.count.lines[p.id];
+      return `<div class="row" style="align-items:center;flex-wrap:nowrap" id="ct-row-${esc(p.id)}">
+        <div style="flex:1 1 auto;min-width:0"><div class="nm" style="overflow-wrap:anywhere">${esc(p.name)}</div>
+          <div class="sub muted">${esc(UNITS[p.unit])}${owner ? ` · attendu ${qty(p.stock_qty)}` : ''} <span data-st="${esc(p.id)}">${l ? '✓ compté' : ''}</span></div></div>
+        <input type="number" inputmode="decimal" min="0" step="${WHOLE.includes(p.unit) ? 1 : 0.001}" data-ct="${esc(p.id)}"
+          value="${l ? esc(l.counted) : ''}" placeholder="?" style="width:90px;flex:0 0 auto" aria-label="Quantité comptée ${esc(p.name)}"></div>`;
+    }).join('') || '<p class="empty">Aucun produit.</p>';
+    document.querySelectorAll('[data-ct]').forEach(i => i.onchange = () => saveCountLine(i));
+  };
+  drawList();
+  $('#ct-q').oninput = drawList;
+  const sc = $('#ct-scan');
+  if (sc) sc.onclick = () => openScanner('Scanner un produit à compter', code => {
+    const p = findByCode(code);
+    if (!p) { toast('Aucun produit avec le code ' + code + '.', true); return true; }
+    if (!list.includes(p)) { toast(p.name + ' ne fait pas partie de ce comptage (' + (c.category || '') + ').', true); return true; }
+    $('#ct-q').value = ''; drawList();
+    setTimeout(() => { const i = document.querySelector(`[data-ct="${p.id}"]`); if (i) { i.scrollIntoView({ block: 'center' }); i.focus(); } }, 50);
+    toast(p.name + ' : tapez la quantité comptée.');
+    return false;
+  });
+  $('#ct-back').onclick = () => { S.tab = 'products'; draw(); };
+  $('#ct-cancel').onclick = cancelCount;
+  const rv = $('#ct-review'); if (rv) rv.onclick = countReview;
+  const sb2 = $('#ct-submit');
+  if (sb2) sb2.onclick = async () => {
+    if (!Object.keys(S.count.lines).length) return toast('Aucun produit compté.', true);
+    const left = list.length - list.filter(p => S.count.lines[p.id]).length;
+    if (left && !sb2.dataset.sure) { sb2.dataset.sure = '1'; sb2.textContent = `Envoyer quand même (${left} non comptés)`; return; }
+    const { error } = await sb.rpc('submit_stock_count', { p_count: c.id });
+    if (error) return toast(cleanErr(error), true);
+    toast('Comptage envoyé au propriétaire pour validation.'); await loadCountState(); viewCount();
+  };
+}
+
+async function saveCountLine(i) {
+  const pid = i.dataset.ct, st = document.querySelector(`[data-st="${pid}"]`);
+  if (i.value.trim() === '') return;
+  const v = Number(i.value);
+  if (st) st.textContent = 'enregistrement…';
+  const { error } = await sb.rpc('record_count_line', { p_count: S.count.c.id, p_product: pid, p_counted: v });
+  if (error) {
+    if (st) st.innerHTML = '<b style="color:var(--bad)">✗ non enregistré</b>';
+    return toast(cleanErr(error), true);
+  }
+  const p = S.products.find(x => x.id === pid);
+  S.count.lines[pid] = { counted: v, expected: p ? Number(p.stock_qty) : 0 };
+  if (st) st.textContent = '✓ compté';
+  const d = $('#ct-done'); if (d) d.textContent = countProducts().filter(x => S.count.lines[x.id]).length;
+}
+
+async function cancelCount() {
+  const b = $('#ct-cancel');
+  if (b && !b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Confirmer l\'annulation'; return; }
+  const { error } = await sb.rpc('cancel_stock_count', { p_count: S.count.c.id });
+  if (error) return toast(cleanErr(error), true);
+  toast('Comptage annulé : le stock n\'a pas été modifié.'); await loadCountState(); viewCount();
+}
+
+function countWaiting() {
+  $('#view').innerHTML = `<section class="card stack"><h2>Comptage envoyé</h2>
+    <p>Votre comptage du ${dt(S.count.c.created_at)} attend la validation du propriétaire. Le stock sera corrigé quand il l'aura validé.</p>
+    <button class="btn ghost" id="ct-back">Retour aux produits</button></section>`;
+  $('#ct-back').onclick = () => { S.tab = 'products'; draw(); };
+}
+
+// Propriétaire : écarts (stock attendu au moment de la saisie, valeur au prix d'achat), puis validation.
+async function countReview() {
+  const { data, error } = await sb.from('stock_count_lines').select('product_id,expected,counted,counted_by').eq('count_id', S.count.c.id);
+  if (error) return toast(cleanErr(error), true);
+  const c = S.count.c, list = countProducts();
+  const rows = (data || []).map(l => {
+    const p = S.products.find(x => x.id === l.product_id) || { name: 'Produit retiré', unit: 'piece' };
+    const diff = Number(l.counted) - Number(l.expected), cost = Number(S.costs[l.product_id] || 0);
+    return { p, exp: Number(l.expected), cnt: Number(l.counted), diff, val: Math.round(diff * cost) };
+  }).sort((a, b) => Math.abs(b.val) - Math.abs(a.val));
+  const loss = rows.filter(r => r.val < 0).reduce((s, r) => s - r.val, 0), gain = rows.filter(r => r.val > 0).reduce((s, r) => s + r.val, 0);
+  const left = list.length - list.filter(p => rows.some(r => r.p.id === p.id)).length;
+  const gaps = rows.filter(r => r.diff !== 0);
+  $('#view').innerHTML = `
+    <section class="card stack">
+      <h2>Écarts du comptage</h2>
+      <div class="muted" style="font-size:13.5px">${esc(c.category || 'Toute la boutique')} · ${dt(c.created_at)} · par ${esc((S.names && S.names[c.created_by]) || '')}${c.status === 'submitted' ? ' · envoyé pour validation' : ''}</div>
+      <div class="grid2"><div class="metric"><span>Manquants (valeur d'achat)</span><b style="color:var(--bad)">${money(loss)}</b></div>
+        <div class="metric"><span>En trop (valeur d'achat)</span><b>${money(gain)}</b></div></div>
+      ${left ? `<div class="banner">${left} produit(s) non compté(s) : leur stock ne sera pas modifié.</div>` : ''}
+      ${gaps.length ? gaps.map(r => `<div class="row" style="font-size:14px;align-items:baseline">
+          <span style="flex:1 1 auto"><b>${esc(r.p.name)}</b><br><span class="muted">attendu ${qty(r.exp)} · compté ${qty(r.cnt)}</span></span>
+          <span style="text-align:right;flex:0 0 auto"><b style="color:${r.diff < 0 ? 'var(--bad)' : 'inherit'}">${r.diff > 0 ? '+' : ''}${qty(r.diff)} ${esc(UNITS[r.p.unit] || '')}</b><br>
+          <span class="muted">${r.val > 0 ? '+' : ''}${money(r.val)}</span></span></div>`).join('')
+        : '<div class="banner ok">Aucun écart : le stock de l\'application correspond au comptage.</div>'}
+      <p class="muted" style="margin:0;font-size:12.5px">Les écarts sont calculés avec le stock au moment où chaque produit a été compté : les ventes faites pendant le comptage sont prises en compte.</p>
+      <button class="btn" id="ct-apply" ${canWrite() && rows.length ? '' : 'disabled'}>Valider et corriger le stock</button>
+      <div class="row">${c.status === 'open' ? '<button class="btn ghost" id="ct-edit">Revenir à la saisie</button>' : ''}
+        <button class="btn ghost" id="ct-cancel" style="color:var(--bad)">Annuler le comptage</button></div>
+    </section>`;
+  const ed = $('#ct-edit'); if (ed) ed.onclick = countEntryScreen;
+  $('#ct-cancel').onclick = cancelCount;
+  $('#ct-apply').onclick = async () => {
+    const b = $('#ct-apply'); b.disabled = true; b.textContent = 'Correction du stock…';
+    const { data: res, error: e2 } = await sb.rpc('apply_stock_count', { p_count: c.id });
+    if (e2) { b.disabled = false; b.textContent = 'Valider et corriger le stock'; return toast(cleanErr(e2), true); }
+    toast(`Stock corrigé : ${res.corrections} produit(s). Manquants ${money(res.loss_value)}, en trop ${money(res.gain_value)}.`);
+    await Promise.all([loadProducts(), loadCountState(), loadAlertCount()]);
+    S.summary = null; draw();
+  };
+}
 
 /* ===== Onglet Historique ===== */
 const SALE_COLS = 'id,invoice_no,discount,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
