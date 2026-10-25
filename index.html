@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Bara Gestion version 2026-10-25e : comptage de stock -->
+<!-- Bara Gestion version 2026-10-25f : clôture de caisse -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -78,6 +78,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   display:flex;padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px))}
 .tabs button{flex:1;min-width:0;background:none;border:0;padding:10px 2px;border-radius:8px;font-weight:600;font-size:13.5px;color:var(--muted);cursor:pointer}
 .tabs button[aria-current="page"]{color:var(--accent);background:var(--accent-soft)}
+.tabs.many button{font-size:12px;padding:10px 0;letter-spacing:-.2px}
+@media (max-width:375px){.tabs.many button{font-size:11px;letter-spacing:-.3px}}
 
 /* Contenu */
 main{padding-block:16px;display:grid;gap:16px}
@@ -156,7 +158,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-25e';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-25f';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -182,7 +184,7 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, count: null, countPending: false, disc: 0, discMap: null, alertCount: 0, alerts: null, devices: null, offAllowed: null
+  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, cash: null, count: null, countPending: false, disc: 0, discMap: null, alertCount: 0, alerts: null, devices: null, offAllowed: null
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
@@ -435,7 +437,8 @@ const ALERT_TEXT = {
   device_new: (a, who) => `Nouveau téléphone ou données effacées pour ${who} (code ${a.details.code}). Normal s'il a changé de téléphone, à vérifier sinon.`,
   offline_not_allowed: (a, who) => `${who} a vendu hors ligne sans autorisation (réf. ${a.details.ref}). La vente a été gardée.`,
   discount_over: (a, who) => `Remise au-dessus du maximum par ${who} (réf. ${a.details.ref}) : ${money(a.details.discount)} sur ${money(a.details.subtotal)}, maximum ${a.details.max_pct} %.`,
-  count_gap: (a, who) => `Grand écart au comptage : ${a.details.product}, attendu ${qty(a.details.expected)}, compté ${qty(a.details.counted)} (${money(a.details.value)}). Comptage de ${who}.`,
+  count_gap: (a, who) => `Grand écart au comptage : ${a.details.product}, attendu ${qty(a.details.expected)}, compté ${qty(a.details.counted)} (${a.details.value > 0 ? '+' : ''}${money(a.details.value)}). Comptage de ${who}.`,
+  cash_gap: (a, who) => `Écart de caisse : ${a.details.gap > 0 ? '+' : '−'} ${money(Math.abs(a.details.gap))} (attendu ${money(a.details.expected)}, compté ${money(a.details.counted)}). Caisse fermée par ${who}.`,
   clock: (a, who) => `Heure incorrecte sur le téléphone de ${who} pour la vente ${a.details.ref}.`
 };
 
@@ -617,7 +620,7 @@ async function selectShop(id) {
   storage.setItem('bg_shop', id);
   S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
-  await Promise.all([loadProducts(), loadSub(), loadAlertCount(), loadCountState()]);
+  await Promise.all([loadProducts(), loadSub(), loadAlertCount(), loadCountState(), loadCash()]);
   draw();
   registerDevice();
   syncQueue();
@@ -679,7 +682,7 @@ function draw() {
   if (S.tab === 'count' && !isManager()) S.tab = 'products';
   if (S.offline) { if (!['sale', 'products'].includes(S.tab)) S.tab = 'sale'; }   // le reste demande internet
   else {
-    tabs.push(['history','Historique']);
+    tabs.push(['history','Historique'], ['cash','Caisse']);
     if (isManager()) tabs.push(['report','Bilan']);
     if (S.role === 'owner') tabs.push(['team', S.alertCount ? `Équipe (${S.alertCount})` : 'Équipe']);
   }
@@ -697,12 +700,12 @@ function draw() {
       ${banner()}
     </header>
     <main id="view"></main>
-    <nav class="tabs" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k || (S.tab==='count' && k==='products')?'aria-current="page"':''}>${l}</button>`).join('')}</nav>
+    <nav class="tabs${tabs.length > 5 ? ' many' : ''}" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k || (S.tab==='count' && k==='products')?'aria-current="page"':''}>${l}</button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
   $('#logout').onclick = askLeave;
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { stopScan(); S.tab = b.dataset.tab; draw(); });
-  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount })[S.tab]();
+  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash })[S.tab]();
 }
 
 /* ===== Onglet Vente ===== */
@@ -713,7 +716,7 @@ function cartTotal() {
 }
 
 function viewSale() {
-  $('#view').innerHTML = `
+  $('#view').innerHTML = `${!S.offline && S.cash && !S.cash.open ? '<div class="banner">Caisse non ouverte. <button class="btn small" id="go-cash" style="margin-left:6px">Ouvrir la caisse</button></div>' : ''}
     ${S.last ? `<section class="card"><div class="row" style="align-items:center"><div>${S.last.rec ? 'Vente gardée (hors ligne)' : 'Vente enregistrée'} : <b class="num">${esc(money(S.last.total))}</b></div>
       <button class="btn small" id="last-inv" style="flex:0 0 auto">Facture</button><button class="btn ghost small" id="last-x" style="flex:0 0 auto">OK</button></div></section>` : ''}
     <section class="card stack">
@@ -726,6 +729,7 @@ function viewSale() {
     <section class="card stack" id="cart"></section>`;
   const q = $('#q');
   const sc = $('#scan'); if (sc) sc.onclick = scanToCart;
+  const gc = $('#go-cash'); if (gc) gc.onclick = () => { S.tab = 'cash'; draw(); };
   q.oninput = () => { S.q = q.value; drawProducts(); };
   q.onkeydown = ev => {
     if (ev.key !== 'Enter') return;
@@ -1192,6 +1196,122 @@ async function countReview() {
     toast(`Stock corrigé : ${res.corrections} produit(s). Manquants ${money(res.loss_value)}, en trop ${money(res.gain_value)}.`);
     await Promise.all([loadProducts(), loadCountState(), loadAlertCount()]);
     S.summary = null; draw();
+  };
+}
+
+/* ===== Caisse (ouverture, opérations, fermeture) =====
+   Fermeture « à l'aveugle » : le vendeur tape ce qu'il compte ; seuls le propriétaire et le
+   gérant voient le montant attendu et l'écart. Les calculs sont faits par la base. */
+const DENOMS = [10000, 5000, 2000, 1000, 500, 250, 200, 100, 50, 25, 10, 5];
+
+async function loadCash() {
+  S.cash = null;
+  if (S.offline) return;
+  try { const { data, error } = await sb.rpc('cash_status', { p_shop: S.shop.id }); if (!error) S.cash = data; } catch (e) {}
+}
+
+async function viewCash() {
+  $('#view').innerHTML = '<p class="empty">Chargement…</p>';
+  await loadCash();
+  if (!S.cash) { $('#view').innerHTML = '<div class="banner bad">La caisse demande une connexion internet.</div>'; return; }
+  await ensureNames();
+  const mgr = isManager(), who = id => esc((S.names && S.names[id]) || '');
+  let cur = null, past = [];
+  if (mgr) {
+    const [c, p] = await Promise.all([sb.rpc('cash_current', { p_shop: S.shop.id }),
+      sb.from('cash_sessions').select('*').eq('shop_id', S.shop.id).eq('status', 'closed').order('closed_at', { ascending: false }).limit(10)]);
+    cur = c.data || null; past = p.data || [];
+  }
+  const L = (label, v, strong, neg) => `<div class="row" style="font-size:14.5px"><span>${label}</span><span class="num" style="text-align:right${strong ? ';font-weight:700' : ''}">${neg && v ? '− ' : ''}${money(v)}</span></div>`;
+  const hist = mgr ? `<section class="card stack"><h3 style="margin:0">Dernières fermetures</h3>
+    ${past.length ? past.map(x => `<div class="row" style="font-size:13.5px;align-items:baseline">
+      <span class="muted">${dt(x.closed_at)} · ${who(x.closed_by)}</span>
+      <span style="text-align:right">compté ${money(x.counted)}<br><b style="color:${x.gap < 0 ? 'var(--bad)' : x.gap > 0 ? 'inherit' : 'var(--ok, inherit)'}">${x.gap === 0 ? '✓ juste' : (x.gap > 0 ? '+' : '−') + ' ' + money(Math.abs(x.gap))}</b>${x.mobile_money ? `<br><span class="muted">Mobile Money ${money(x.mobile_money)}</span>` : ''}</span></div>`).join('')
+      : '<p class="muted" style="margin:0">Aucune fermeture pour le moment.</p>'}</section>` : '';
+  if (!S.cash.open) {
+    $('#view').innerHTML = `<section class="card stack"><h2>Caisse fermée</h2>
+      <p class="muted" style="margin:0">Le matin, comptez la monnaie de départ dans le tiroir, puis ouvrez la caisse.</p>
+      <label>Fonds de caisse (FCFA)<input id="cs-float" type="number" inputmode="numeric" min="0" step="5" value="${esc(S.cash.suggested_float || 0)}"></label>
+      <button class="btn" id="cs-open" ${canWrite() ? '' : 'disabled'}>Ouvrir la caisse</button></section>${hist}`;
+    $('#cs-open').onclick = async () => {
+      const v = Math.round(Number($('#cs-float').value));
+      if (!(v >= 0)) return toast('Fonds de caisse invalide.', true);
+      const { error } = await sb.rpc('open_cash', { p_shop: S.shop.id, p_float: v });
+      if (error) return toast(cleanErr(error), true);
+      toast('Caisse ouverte.'); draw();
+    };
+    return;
+  }
+  $('#view').innerHTML = `<section class="card stack"><h2>Caisse ouverte</h2>
+      <div class="muted" style="font-size:13.5px">Depuis ${dt(S.cash.opened_at)} · ouverte par ${who(S.cash.opened_by)}</div>
+      ${cur ? `<div class="stack" style="gap:4px">${L('Fonds de caisse', cur.opening_float)}${L('Ventes en espèces', cur.cash_sales)}
+        ${cur.cash_refunds ? L('Ventes annulées (argent rendu)', cur.cash_refunds, false, true) : ''}${cur.deposits ? L('Dépôts', cur.deposits) : ''}
+        ${cur.expenses_cash ? L('Dépenses payées en caisse', cur.expenses_cash, false, true) : ''}${cur.withdrawals ? L('Retraits', cur.withdrawals, false, true) : ''}
+        <div class="total"><span>Attendu dans la caisse</span><span class="num">${money(cur.expected)}</span></div>
+        ${L('Mobile Money (à vérifier sur le compte)', cur.mobile_money)}</div>` : ''}
+      <div class="row"><button class="btn ghost small" id="cs-exp" ${canWrite() ? '' : 'disabled'}>Dépense payée en caisse</button>
+        ${mgr ? `<button class="btn ghost small" id="cs-wd" ${canWrite() ? '' : 'disabled'}>Retrait</button><button class="btn ghost small" id="cs-dep" ${canWrite() ? '' : 'disabled'}>Dépôt</button>` : ''}</div>
+      <button class="btn" id="cs-close" ${canWrite() ? '' : 'disabled'}>Fermer la caisse (comptage du soir)</button></section>${hist}`;
+  $('#cs-exp').onclick = () => cashMoveSheet('expense');
+  const wd = $('#cs-wd'); if (wd) wd.onclick = () => cashMoveSheet('withdrawal');
+  const dp = $('#cs-dep'); if (dp) dp.onclick = () => cashMoveSheet('deposit');
+  $('#cs-close').onclick = cashCloseSheet;
+}
+
+function cashMoveSheet(kind) {
+  const T = { expense: 'Dépense payée en caisse', withdrawal: 'Retrait d\'argent', deposit: 'Dépôt d\'argent (monnaie ajoutée)' }[kind];
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="${esc(T)}">
+    <h2>${esc(T)}</h2>
+    <label>Montant (FCFA)<input id="m-amt" type="number" inputmode="numeric" min="1" step="1" required></label>
+    ${kind === 'expense' ? `<label>Catégorie<select id="m-cat">${Object.entries(EXP).map(([k, v]) => `<option value="${k}" ${k === 'other' ? 'selected' : ''}>${v}</option>`).join('')}</select></label>` : ''}
+    <label>Motif (obligatoire)<input id="m-why" maxlength="200" required placeholder="${kind === 'withdrawal' ? 'ex. versé à la banque' : kind === 'deposit' ? 'ex. monnaie apportée' : 'ex. achat de sachets'}"></label>
+    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const { error } = await sb.rpc('cash_movement', { p_shop: S.shop.id, p_kind: kind, p_amount: Math.round(Number($('#m-amt').value)),
+      p_reason: $('#m-why').value, p_category: kind === 'expense' ? $('#m-cat').value : 'other' });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    closeSheet(); toast('Enregistré.'); S.summary = null; viewCash();
+  };
+}
+
+function cashCloseSheet() {
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Fermer la caisse">
+    <h2>Fermer la caisse</h2>
+    <p class="muted" style="margin:0;font-size:13.5px">Comptez l'argent du tiroir. Tapez le nombre de billets et de pièces, ou seulement le total.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">${DENOMS.map(d => `<label style="font-size:13.5px">${plainMoney(d)}<input type="number" inputmode="numeric" min="0" step="1" data-dn="${d}" placeholder="0"></label>`).join('')}</div>
+    <label>Total compté (FCFA)<input id="c-total" type="number" inputmode="numeric" min="0" step="5" required></label>
+    <label>Remarque (facultatif)<input id="c-note" maxlength="300"></label>
+    <div class="row"><button class="btn" type="submit">Fermer la caisse</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  let byDenoms = false;
+  const sum = () => {
+    let t = 0, any = false;
+    document.querySelectorAll('[data-dn]').forEach(i => { const n = Math.round(Number(i.value) || 0); if (i.value !== '') any = true; t += n * Number(i.dataset.dn); });
+    byDenoms = any; if (any) $('#c-total').value = t;
+  };
+  document.querySelectorAll('[data-dn]').forEach(i => i.oninput = sum);
+  $('#c-total').oninput = () => { if (byDenoms) { document.querySelectorAll('[data-dn]').forEach(i => { i.value = ''; }); byDenoms = false; } };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]');
+    const total = Math.round(Number($('#c-total').value));
+    if (!(total >= 0)) return toast('Total invalide.', true);
+    if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Confirmer : ${plainMoney(total)} FCFA`; return; }
+    btn.disabled = true;
+    let denoms = null;
+    if (byDenoms) { denoms = {}; document.querySelectorAll('[data-dn]').forEach(i => { const n = Math.round(Number(i.value) || 0); if (n) denoms[i.dataset.dn] = n; }); }
+    const { data, error } = await sb.rpc('close_cash', { p_shop: S.shop.id, p_counted: total, p_denoms: denoms, p_note: $('#c-note').value || null });
+    if (error) { btn.disabled = false; btn.dataset.sure = ''; btn.textContent = 'Fermer la caisse'; return toast(cleanErr(error), true); }
+    closeSheet();
+    if (data && data.gap !== undefined) {
+      toast(data.gap === 0 ? 'Caisse fermée : le compte est juste.' : `Caisse fermée. Écart : ${data.gap > 0 ? '+' : '−'} ${money(Math.abs(data.gap))} (attendu ${money(data.expected)}).`, data.gap < 0);
+    } else toast('Caisse fermée. Merci, le propriétaire verra le résultat.');
+    await loadAlertCount(); draw();
   };
 }
 
