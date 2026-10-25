@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Bara Gestion version 2026-10-25f : clôture de caisse -->
+<!-- Bara Gestion version 2026-10-25g : crédit et clients -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -78,8 +78,10 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   display:flex;padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px))}
 .tabs button{flex:1;min-width:0;background:none;border:0;padding:10px 2px;border-radius:8px;font-weight:600;font-size:13.5px;color:var(--muted);cursor:pointer}
 .tabs button[aria-current="page"]{color:var(--accent);background:var(--accent-soft)}
-.tabs.many button{font-size:12px;padding:10px 0;letter-spacing:-.2px}
-@media (max-width:375px){.tabs.many button{font-size:11px;letter-spacing:-.3px}}
+.tabs button{display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.15}
+.tabs button .ic{font-size:17px;line-height:1}
+.tabs.many button{font-size:11px;padding:7px 0;letter-spacing:-.2px}
+@media (max-width:375px){.tabs.many button{font-size:10px;letter-spacing:-.3px}}
 
 /* Contenu */
 main{padding-block:16px;display:grid;gap:16px}
@@ -158,7 +160,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-25f';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-25g';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -184,7 +186,7 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, cash: null, count: null, countPending: false, disc: 0, discMap: null, alertCount: 0, alerts: null, devices: null, offAllowed: null
+  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, customers: null, custSel: null, creditMap: null, cash: null, count: null, countPending: false, disc: 0, discMap: null, alertCount: 0, alerts: null, devices: null, offAllowed: null
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
@@ -201,7 +203,11 @@ function saveCache() {
       v: 1, savedAt: Date.now(), userId: S.user.id, role: S.role,
       shop: { id: S.shop.id, name: S.shop.name, type: S.shop.type, who: S.shop.who,
               phone: S.shop.phone, address: S.shop.address, footer: S.shop.footer,
-              offAllowed: !!S.shop.offAllowed, maxPending: S.shop.maxPending || 30, discMax: S.shop.discMax || 0 },
+              offAllowed: !!S.shop.offAllowed, maxPending: S.shop.maxPending || 30, discMax: S.shop.discMax || 0,
+              creditAllowed: !!S.shop.creditAllowed },
+      // Clients (nom, téléphone) gardés seulement pour ceux qui peuvent vendre à crédit, pour le crédit hors ligne.
+      customers: canCredit() && S.customers ? S.customers.filter(c => c.active !== false && c.phone)
+        .map(c => ({ id: c.id, name: c.name, phone: c.phone, balance: c.balance, active: true })) : [],
       products: S.products.map(p => ({ id: p.id, name: p.name, category: p.category, unit: p.unit,
         sell_price: p.sell_price, stock_qty: p.stock_qty, alert_threshold: p.alert_threshold, barcode: p.barcode }))
     }));
@@ -299,9 +305,9 @@ function queueSale(total, paid, pay, customer, disc = 0) {
       return drawCart();
     }
   }
-  if (customer && customer.length > 100) { toast('Nom du client trop long.', true); return drawCart(); }
+
   if (paid < 0 || paid > total || !Number.isFinite(paid)) { toast('Le montant encaissé doit être compris entre 0 et le total.', true); return drawCart(); }
-  if (paid < total && !customer) { toast('Le nom du client est obligatoire pour une vente à crédit.', true); return drawCart(); }
+  if (paid < total && !customer) { toast('Vente à crédit : choisissez le client.', true); return drawCart(); }
   const items = [...S.cart].map(([id, q]) => {
     const p = S.products.find(x => x.id === id);
     return { product_id: id, quantity: q, unit_price: Number(p.sell_price), name: p.name, unit: p.unit };
@@ -309,7 +315,8 @@ function queueSale(total, paid, pay, customer, disc = 0) {
   let rec;
   try {
     rec = { client_ref: S.ref, offline_ref: nextRef(dev), device_id: dev, shop_id: S.shop.id, user_id: S.user.id,
-      seller: S.shop.who, created_at: new Date().toISOString(), items, total, paid, discount: disc, payment_method: pay, customer };
+      seller: S.shop.who, created_at: new Date().toISOString(), items, total, paid, discount: disc, payment_method: pay,
+      customer: customer ? customer.name : null, customer_id: customer ? customer.id : null };
     const q = readQueue();
     if (!q.some(r => r.client_ref === rec.client_ref)) q.push(rec);
     writeQueue(q);
@@ -323,7 +330,7 @@ function queueSale(total, paid, pay, customer, disc = 0) {
     const c = JSON.parse(storage.getItem(CACHE_KEY) || 'null');
     if (c && c.userId === S.user.id) { c.products = S.products.map(p => ({ ...p })); storage.setItem(CACHE_KEY, JSON.stringify(c)); }
   } catch (e) {}
-  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.last = { rec, total };
+  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.last = { rec, total };
   toast('Vente gardée sur le téléphone : ' + money(total) + ' (réf. ' + rec.offline_ref + ')');
   draw();
   syncQueue();
@@ -349,7 +356,8 @@ async function syncQueue(manual) {
     const { data, error } = await sb.rpc('sync_offline_sale', {
       p_shop: r.shop_id, p_device: r.device_id, p_offline_ref: r.offline_ref, p_client_ref: r.client_ref,
       p_created_at: r.created_at, p_items: r.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price })),
-      p_paid: r.paid, p_payment_method: r.payment_method, p_customer: r.customer, ...(r.discount ? { p_discount: r.discount } : {}) });
+      p_paid: r.paid, p_payment_method: r.payment_method, p_customer: r.customer_id ? null : r.customer,
+      ...(r.discount ? { p_discount: r.discount } : {}), ...(r.customer_id ? { p_customer_id: r.customer_id } : {}) });
     const q = readQueue();
     if (!error && data && data.sale_id) {
       try { writeQueue(q.filter(x => x.client_ref !== r.client_ref)); } catch (e) { stop = true; }
@@ -439,6 +447,9 @@ const ALERT_TEXT = {
   discount_over: (a, who) => `Remise au-dessus du maximum par ${who} (réf. ${a.details.ref}) : ${money(a.details.discount)} sur ${money(a.details.subtotal)}, maximum ${a.details.max_pct} %.`,
   count_gap: (a, who) => `Grand écart au comptage : ${a.details.product}, attendu ${qty(a.details.expected)}, compté ${qty(a.details.counted)} (${a.details.value > 0 ? '+' : ''}${money(a.details.value)}). Comptage de ${who}.`,
   cash_gap: (a, who) => `Écart de caisse : ${a.details.gap > 0 ? '+' : '−'} ${money(Math.abs(a.details.gap))} (attendu ${money(a.details.expected)}, compté ${money(a.details.counted)}). Caisse fermée par ${who}.`,
+  credit_not_allowed: (a, who) => `${who} a vendu à crédit hors ligne sans autorisation : ${money(a.details.credit)} pour ${a.details.customer} (réf. ${a.details.ref}).`,
+  credit_over: (a, who) => `Plafond de crédit dépassé hors ligne par ${who} : ${a.details.customer} (plafond ${money(a.details.limit)}, nouveau crédit ${money(a.details.credit)}).`,
+  payment_cancelled: (a, who) => `Remboursement annulé par ${who} : ${money(a.details.amount)} de ${a.details.customer} (${a.details.reason}).`,
   clock: (a, who) => `Heure incorrecte sur le téléphone de ${who} pour la vente ${a.details.ref}.`
 };
 
@@ -463,12 +474,12 @@ function openDiscMax(uid) {
 
 async function loadOfflineAdmin() {
   const [m, d, a] = await Promise.all([
-    sb.from('shop_members').select('user_id, offline_allowed, discount_max_pct').eq('shop_id', S.shop.id),
+    sb.from('shop_members').select('user_id, offline_allowed, discount_max_pct, credit_allowed').eq('shop_id', S.shop.id),
     sb.from('devices').select('user_id, code, pending, last_seen').eq('shop_id', S.shop.id).order('last_seen', { ascending: false }),
     sb.from('alerts').select('id, kind, user_id, details, created_at, seen_at').eq('shop_id', S.shop.id).order('created_at', { ascending: false }).limit(30)]);
   if (m.error || d.error || a.error) throw new Error(cleanErr(m.error || d.error || a.error));
-  S.offAllowed = {}; S.discMap = {};
-  (m.data || []).forEach(r => { S.offAllowed[r.user_id] = r.offline_allowed; S.discMap[r.user_id] = Number(r.discount_max_pct) || 0; });
+  S.offAllowed = {}; S.discMap = {}; S.creditMap = {};
+  (m.data || []).forEach(r => { S.offAllowed[r.user_id] = r.offline_allowed; S.discMap[r.user_id] = Number(r.discount_max_pct) || 0; S.creditMap[r.user_id] = !!r.credit_allowed; });
   S.devices = d.data || []; S.alerts = a.data || [];
 }
 
@@ -511,6 +522,14 @@ function bindOfflineAdmin() {
     S.alertCount = 0; S.alerts = null; S.team = null; draw();
   };
   document.querySelectorAll('[data-disc]').forEach(b => b.onclick = () => openDiscMax(b.dataset.disc));
+  document.querySelectorAll('[data-cr]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const to = b.dataset.to === '1';
+    const { error } = await sb.rpc('set_credit_allowed', { p_shop: S.shop.id, p_user: b.dataset.cr, p_allowed: to });
+    if (error) { b.disabled = false; return toast(cleanErr(error), true); }
+    toast(to ? 'Vente à crédit autorisée.' : 'Vente à crédit retirée (effective à la prochaine ouverture de l\'application).');
+    S.offAllowed = null; viewTeam();
+  });
   document.querySelectorAll('[data-off]').forEach(b => b.onclick = async () => {
     b.disabled = true;
     const to = b.dataset.to === '1';
@@ -581,7 +600,7 @@ function drawLogin(msg) {
 async function loadContext() {
   $('#app').innerHTML = '<p class="empty">Chargement…</p>';
   const { data, error } = await sb.from('shop_members')
-    .select('shop_id, role, display_name, offline_allowed, discount_max_pct, shops(name, shop_type, phone, address, invoice_footer, offline_max_pending)')
+    .select('shop_id, role, display_name, offline_allowed, discount_max_pct, credit_allowed, shops(name, shop_type, phone, address, invoice_footer, offline_max_pending)')
     .eq('user_id', S.user.id).eq('active', true);
   if (error) {
     const c = readCache();
@@ -615,12 +634,12 @@ async function selectShop(id) {
   S.shop = { id, name: m.shops.name, type: m.shops.shop_type, who: m.display_name,
     phone: m.shops.phone || '', address: m.shops.address || '', footer: m.shops.invoice_footer || '',
     offAllowed: !!m.offline_allowed, maxPending: Number(m.shops.offline_max_pending) || 30,
-    discMax: Number(m.discount_max_pct) || 0 };
+    discMax: Number(m.discount_max_pct) || 0, creditAllowed: !!m.credit_allowed };
   S.role = m.role;
   storage.setItem('bg_shop', id);
-  S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
+  S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
-  await Promise.all([loadProducts(), loadSub(), loadAlertCount(), loadCountState(), loadCash()]);
+  await Promise.all([loadProducts().then(() => canCredit() ? loadCustomers(true) : null), loadSub(), loadAlertCount(), loadCountState(), loadCash()]);
   draw();
   registerDevice();
   syncQueue();
@@ -677,12 +696,13 @@ function subBanner() {
   return '';
 }
 
+const TAB_IC = { sale: '🛒', products: '📦', history: '🧾', clients: '👥', cash: '💰', report: '📊', team: '⚙️' };
 function draw() {
-  const tabs = [['sale','Vente'], ['products','Produits']];
+  const tabs = [['sale','Vendre'], ['products','Produits']];
   if (S.tab === 'count' && !isManager()) S.tab = 'products';
   if (S.offline) { if (!['sale', 'products'].includes(S.tab)) S.tab = 'sale'; }   // le reste demande internet
   else {
-    tabs.push(['history','Historique'], ['cash','Caisse']);
+    tabs.push(['history','Ventes'], ['clients','Clients'], ['cash','Caisse']);
     if (isManager()) tabs.push(['report','Bilan']);
     if (S.role === 'owner') tabs.push(['team', S.alertCount ? `Équipe (${S.alertCount})` : 'Équipe']);
   }
@@ -700,12 +720,12 @@ function draw() {
       ${banner()}
     </header>
     <main id="view"></main>
-    <nav class="tabs${tabs.length > 5 ? ' many' : ''}" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k || (S.tab==='count' && k==='products')?'aria-current="page"':''}>${l}</button>`).join('')}</nav>
+    <nav class="tabs${tabs.length > 5 ? ' many' : ''}" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k || (S.tab==='count' && k==='products')?'aria-current="page"':''}><span class="ic" aria-hidden="true">${TAB_IC[k] || ''}</span><span>${l}</span></button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
   $('#logout').onclick = askLeave;
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { stopScan(); S.tab = b.dataset.tab; draw(); });
-  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash })[S.tab]();
+  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash, clients: viewClients })[S.tab]();
 }
 
 /* ===== Onglet Vente ===== */
@@ -806,7 +826,10 @@ function drawCart() {
       <label>Montant encaissé (FCFA)<input id="paid" type="number" inputmode="numeric" min="0" step="1" value="${total}"></label>
       <label>Paiement<select id="pay">${Object.entries(PAY).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
     </div>
-    <label>Nom du client (obligatoire si paiement partiel)<input id="cust" maxlength="100" autocomplete="off"></label>
+    <div class="row" style="align-items:center;flex-wrap:nowrap"><div style="flex:1 1 auto;min-width:0">
+      <div class="muted" style="font-size:13px">Client (obligatoire pour un crédit)</div>
+      <div id="cust-sel" style="font-weight:600">${S.custSel ? esc(S.custSel.name) + ' <span class="muted" style="font-weight:400">' + esc(S.custSel.phone || '') + '</span>' : '<span class="muted" style="font-weight:400">aucun</span>'}</div></div>
+      <button class="btn ghost small" type="button" id="cust-pick" style="flex:0 0 auto">${S.custSel ? 'Changer' : 'Choisir'}</button></div>
     <div class="row"><button class="btn" id="validate" ${canWrite() || canSellOffline() ? '' : 'disabled'}>${S.offline ? 'Valider (hors ligne)' : 'Valider la vente'}</button>
       <button class="btn ghost" id="clear">Vider</button></div>`;
   el.querySelectorAll('[data-qty]').forEach(i => i.onchange = () => {
@@ -815,7 +838,8 @@ function drawCart() {
     drawCart();
   });
   el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.cart.delete(b.dataset.rm); drawCart(); });
-  $('#clear').onclick = () => { S.cart.clear(); S.ref = uuid(); S.disc = 0; drawCart(); };
+  $('#clear').onclick = () => { S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; drawCart(); };
+  $('#cust-pick').onclick = pickCustomer;
   const di = $('#disc');
   if (di) di.oninput = () => {
     const v = Math.round(Number(di.value) || 0);
@@ -832,7 +856,11 @@ async function submitSale() {
   const sub = cartTotal(), disc = S.disc || 0, total = sub - disc;
   const paidRaw = $('#paid').value.trim();
   const paid = paidRaw === '' ? total : Math.round(Number(paidRaw));
-  const pay = $('#pay').value, customer = $('#cust').value.trim() || null;
+  const pay = $('#pay').value, customer = S.custSel;
+  if (paid < total) {
+    if (!customer) { S.busy = false; toast('Vente à crédit : choisissez le client (avec son téléphone).', true); return drawCart(); }
+    if (!canCredit()) { S.busy = false; toast('Vente à crédit non autorisée pour vous : demandez au propriétaire.', true); return drawCart(); }
+  }
   const dErr = discError(sub, disc);
   if (dErr) { S.busy = false; toast(dErr, true); return drawCart(); }
   if (S.offline) { S.busy = false; return queueSale(total, paid, pay, customer, disc); }
@@ -854,14 +882,15 @@ async function submitSale() {
   const items = [...S.cart].map(([product_id, quantity]) => ({ product_id, quantity }));
   const { data: newSale, error } = await sb.rpc('create_sale', {
     p_shop: S.shop.id, p_items: items, p_paid: paid,
-    p_payment_method: pay, p_customer: customer, p_client_ref: S.ref, ...(disc ? { p_discount: disc } : {})
+    p_payment_method: pay, p_customer: null, p_client_ref: S.ref, ...(disc ? { p_discount: disc } : {}),
+    ...(customer ? { p_customer_id: customer.id } : {})
   });
   S.busy = false;
   // Réseau coupé pendant l'envoi : si la vente hors ligne est permise, elle part dans la file
   // avec la MÊME référence. Si le serveur l'avait déjà reçue, il ne la comptera pas deux fois.
   if (error && isNetErr(error) && offlineRight()) return queueSale(total, paid, pay, customer, disc);
   if (error) { toast(cleanErr(error), true); return drawCart(); }
-  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.sales = null; S.summary = null; S.last = newSale ? { id: newSale, total } : null;
+  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.customers = null; S.sales = null; S.summary = null; S.last = newSale ? { id: newSale, total } : null;
   toast('Vente enregistrée : ' + money(total));
   await loadProducts();
   viewSale();
@@ -1245,6 +1274,7 @@ async function viewCash() {
   $('#view').innerHTML = `<section class="card stack"><h2>Caisse ouverte</h2>
       <div class="muted" style="font-size:13.5px">Depuis ${dt(S.cash.opened_at)} · ouverte par ${who(S.cash.opened_by)}</div>
       ${cur ? `<div class="stack" style="gap:4px">${L('Fonds de caisse', cur.opening_float)}${L('Ventes en espèces', cur.cash_sales)}
+        ${cur.repayments ? L('Remboursements de crédit', cur.repayments) : ''}
         ${cur.cash_refunds ? L('Ventes annulées (argent rendu)', cur.cash_refunds, false, true) : ''}${cur.deposits ? L('Dépôts', cur.deposits) : ''}
         ${cur.expenses_cash ? L('Dépenses payées en caisse', cur.expenses_cash, false, true) : ''}${cur.withdrawals ? L('Retraits', cur.withdrawals, false, true) : ''}
         <div class="total"><span>Attendu dans la caisse</span><span class="num">${money(cur.expected)}</span></div>
@@ -1312,6 +1342,229 @@ function cashCloseSheet() {
       toast(data.gap === 0 ? 'Caisse fermée : le compte est juste.' : `Caisse fermée. Écart : ${data.gap > 0 ? '+' : '−'} ${money(Math.abs(data.gap))} (attendu ${money(data.expected)}).`, data.gap < 0);
     } else toast('Caisse fermée. Merci, le propriétaire verra le résultat.');
     await loadAlertCount(); draw();
+  };
+}
+
+/* ===== Clients, crédit et remboursements =====
+   Une vente à crédit exige une fiche client (avec téléphone). Les soldes sont calculés par la base.
+   Remboursement : tout membre ; en espèces, il entre dans la caisse du jour. */
+const canCredit = () => S.role === 'owner' || S.role === 'manager' || !!(S.shop && S.shop.creditAllowed);
+
+async function loadCustomers(force) {
+  if (S.offline) { if (!S.customers) S.customers = (readCache() || {}).customers || []; return S.customers; }
+  if (S.customers && !force) return S.customers;
+  const { data, error } = await sb.rpc('customer_list', { p_shop: S.shop.id });
+  if (error) { toast(cleanErr(error), true); return S.customers || []; }
+  S.customers = data || [];
+  if (canCredit()) saveCache();      // gardés sur le téléphone pour le crédit hors ligne (clients connus seulement)
+  return S.customers;
+}
+
+// Lien WhatsApp vers le client : numéro à 8 chiffres = Burkina Faso (+226).
+function waNumber(phone) {
+  const d = String(phone || '').replace(/[^0-9]/g, '');
+  if (!d) return '';
+  return String(phone).trim().startsWith('+') ? d : (d.length === 8 ? '226' + d : d);
+}
+
+// Choix du client dans le panier (vente à crédit ou client nommé).
+async function pickCustomer() {
+  const list = await loadCustomers();
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Choisir le client">
+    <h2>Choisir le client</h2>
+    <input id="pk-q" type="search" placeholder="Nom ou téléphone" autocomplete="off">
+    <div class="plist" id="pk-list" style="max-height:45vh;overflow:auto"></div>
+    ${canCredit() && !S.offline ? '<button class="btn ghost" id="pk-new">+ Nouveau client</button>' : ''}
+    ${S.offline ? '<p class="muted" style="margin:0;font-size:13px">Hors ligne : seulement les clients déjà enregistrés.</p>' : ''}
+    <div class="row"><button class="btn ghost" id="pk-none">Sans client</button><button class="btn ghost" id="cancel">Fermer</button></div></div></div>`;
+  const draw1 = () => {
+    const t = ($('#pk-q').value || '').trim().toLowerCase(), td = t.replace(/[^0-9]/g, '');
+    const rows = list.filter(c => c.active !== false && (!t || c.name.toLowerCase().includes(t) || (td && (c.phone || '').includes(td)))).slice(0, 50);
+    $('#pk-list').innerHTML = rows.map(c => `<button class="prod" data-pk="${esc(c.id)}"><span><span class="nm">${esc(c.name)}</span><br>
+      <span class="sub">${esc(c.phone || 'sans téléphone')}</span></span><span class="pr" style="${c.balance > 0 ? 'color:var(--bad)' : ''}">${c.balance > 0 ? 'doit ' + money(c.balance) : ''}</span></button>`).join('')
+      || '<p class="empty">Aucun client trouvé.</p>';
+    document.querySelectorAll('[data-pk]').forEach(b => b.onclick = () => {
+      const c = list.find(x => x.id === b.dataset.pk);
+      if (!c.phone) return toast('Ajoutez d\'abord le téléphone de ce client (onglet Clients, Modifier).', true);
+      S.custSel = { id: c.id, name: c.name, phone: c.phone }; closeSheet(); drawCart();
+    });
+  };
+  draw1();
+  $('#pk-q').oninput = draw1;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#pk-none').onclick = () => { S.custSel = null; closeSheet(); drawCart(); };
+  const nw = $('#pk-new'); if (nw) nw.onclick = () => customerForm(null, c => { S.custSel = { id: c.id, name: c.name, phone: c.phone }; drawCart(); });
+}
+
+// Nouveau client (ou modification par le propriétaire / gérant).
+function customerForm(c, after) {
+  const mgr = isManager();
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Client">
+    <h2>${c ? 'Modifier le client' : 'Nouveau client'}</h2>
+    <label>Nom<input id="cu-name" maxlength="100" required value="${esc(c ? c.name : '')}"></label>
+    <label>Téléphone (obligatoire)<input id="cu-phone" type="tel" inputmode="tel" required placeholder="ex. 70 11 22 33" value="${esc(c ? c.phone || '' : '')}"></label>
+    <label>Remarque (facultatif)<input id="cu-note" maxlength="200" value="${esc(c ? c.note || '' : '')}"></label>
+    ${mgr ? `<label>Plafond de crédit en FCFA (vide = sans plafond)<input id="cu-limit" type="number" inputmode="numeric" min="0" step="500" value="${esc(c && c.credit_limit != null ? c.credit_limit : '')}"></label>` : ''}
+    ${c && mgr ? `<div style="display:flex;align-items:center;gap:10px"><input id="cu-off" type="checkbox" ${c.active === false ? 'checked' : ''} style="width:22px;height:22px;flex:0 0 auto;margin:0"><span style="font-size:14px">Client retiré (n'apparaît plus dans les choix)</span></div>` : ''}
+    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const lim = mgr && $('#cu-limit').value !== '' ? Math.round(Number($('#cu-limit').value)) : null;
+    const res = c
+      ? await sb.rpc('update_customer', { p_customer: c.id, p_name: $('#cu-name').value, p_phone: $('#cu-phone').value,
+          p_note: $('#cu-note').value || null, p_limit: lim, p_active: !($('#cu-off') && $('#cu-off').checked) })
+      : await sb.rpc('create_customer', { p_shop: S.shop.id, p_name: $('#cu-name').value, p_phone: $('#cu-phone').value,
+          p_note: $('#cu-note').value || null, p_limit: lim });
+    if (res.error) { btn.disabled = false; return toast(cleanErr(res.error), true); }
+    closeSheet(); toast('Client enregistré.');
+    const list = await loadCustomers(true);
+    const saved = list.find(x => x.id === (c ? c.id : res.data));
+    if (after && saved) after(saved);
+  };
+}
+
+async function viewClients() {
+  $('#view').innerHTML = '<p class="empty">Chargement…</p>';
+  const list = await loadCustomers(true);
+  const debt = list.reduce((a, c) => a + Math.max(0, c.balance), 0);
+  if (S.cOnlyDebt === undefined) S.cOnlyDebt = true;
+  $('#view').innerHTML = `<section class="card stack">
+      <div class="row"><h2 style="flex:1 1 auto">Clients</h2>${canCredit() ? `<button class="btn small" id="cl-new" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau client</button>` : ''}</div>
+      <div class="metric"><span>Total à récupérer (crédits en cours)</span><b style="color:${debt ? 'var(--bad)' : 'inherit'}">${money(debt)}</b></div>
+      <input id="cl-q" type="search" placeholder="Nom ou téléphone" autocomplete="off">
+      <div class="seg"><button class="btn small ${S.cOnlyDebt ? '' : 'ghost'}" id="cl-d">Ceux qui doivent</button><button class="btn small ${S.cOnlyDebt ? 'ghost' : ''}" id="cl-a">Tous</button></div>
+      <div class="plist" id="cl-list"></div></section>`;
+  const draw1 = () => {
+    const t = ($('#cl-q').value || '').trim().toLowerCase(), td = t.replace(/[^0-9]/g, '');
+    const rows = list.filter(c => (!S.cOnlyDebt || c.balance > 0) && (!t || c.name.toLowerCase().includes(t) || (td && (c.phone || '').includes(td))));
+    $('#cl-list').innerHTML = rows.map(c => `<button class="prod" data-cl="${esc(c.id)}" style="${c.active === false ? 'opacity:.6' : ''}">
+      <span><span class="nm">${esc(c.name)}</span><br><span class="sub">${esc(c.phone || '⚠ téléphone manquant')}${c.credit_limit != null ? ' · plafond ' + money(c.credit_limit) : ''}</span></span>
+      <span class="pr" style="${c.balance > 0 ? 'color:var(--bad)' : ''}">${c.balance > 0 ? money(c.balance) : '✓'}</span></button>`).join('')
+      || `<p class="empty">${S.cOnlyDebt ? 'Personne ne doit d\'argent.' : 'Aucun client.'}</p>`;
+    document.querySelectorAll('[data-cl]').forEach(b => b.onclick = () => viewStatement(b.dataset.cl));
+  };
+  draw1();
+  $('#cl-q').oninput = draw1;
+  $('#cl-d').onclick = () => { S.cOnlyDebt = true; viewClients(); };
+  $('#cl-a').onclick = () => { S.cOnlyDebt = false; viewClients(); };
+  const nw = $('#cl-new'); if (nw) nw.onclick = () => customerForm(null, () => viewClients());
+}
+
+async function viewStatement(id) {
+  const { data: st, error } = await sb.rpc('customer_statement', { p_customer: id });
+  if (error) return toast(cleanErr(error), true);
+  await ensureNames();
+  const c = st.customer, mgr = isManager();
+  // Ventes et remboursements, du plus récent au plus ancien.
+  const ev = [
+    ...st.sales.filter(s => s.status === 'completed' && s.paid < s.total || s.status === 'cancelled' && s.paid < s.total)
+      .map(s => ({ at: s.created_at, html: `<div class="row" style="font-size:14px${s.status === 'cancelled' ? ';opacity:.55;text-decoration:line-through' : ''}"><span>${dt(s.created_at)} · Facture ${esc(invNo(s.invoice_no))}<br><span class="muted">total ${money(s.total)}, payé ${money(s.paid)}</span></span><b style="color:var(--bad)">+ ${money(s.total - s.paid)}</b></div>` })),
+    ...st.payments.map(p => ({ at: p.created_at, html: `<div class="row" style="font-size:14px${p.cancelled_at ? ';opacity:.55' : ''}"><span>${dt(p.created_at)} · remboursement ${esc(PAY[p.method] || '')}${p.cancelled_at ? `<br><span class="muted">annulé : ${esc(p.cancel_reason || '')}</span>` : ''}</span>
+      <span style="text-align:right"><b>− ${money(p.amount)}</b>${mgr && !p.cancelled_at ? `<br><button class="btn ghost small" data-pc="${esc(p.id)}">Annuler</button>` : ''}</span></div>` }))
+  ].sort((a, b) => b.at.localeCompare(a.at));
+  $('#view').innerHTML = `<section class="card stack">
+      <h2>${esc(c.name)}</h2>
+      <div class="muted">${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : '⚠ téléphone manquant'}${c.credit_limit != null ? ' · plafond ' + money(c.credit_limit) : ''}${c.note ? ' · ' + esc(c.note) : ''}</div>
+      <div class="metric"><span>Reste à payer</span><b style="color:${st.balance > 0 ? 'var(--bad)' : 'inherit'}">${money(Math.max(0, st.balance))}</b></div>
+      <div class="row">${st.balance > 0 ? `<button class="btn" id="st-pay" ${canWrite() ? '' : 'disabled'}>Remboursement</button>` : ''}
+        ${st.balance > 0 && c.phone ? '<button class="btn ghost" id="st-wa">Rappel WhatsApp</button>' : ''}</div>
+      ${mgr ? '<button class="btn ghost small" id="st-edit">Modifier le client</button>' : ''}
+      <button class="btn ghost" id="st-back">Retour aux clients</button></section>
+    <section class="card stack"><h3 style="margin:0">Crédits et remboursements</h3>${ev.map(e => e.html).join('') || '<p class="muted" style="margin:0">Aucun crédit.</p>'}</section>`;
+  $('#st-back').onclick = viewClients;
+  const pb = $('#st-pay'); if (pb) pb.onclick = () => paymentForm(c, st.balance);
+  const wa = $('#st-wa');
+  if (wa) wa.onclick = () => window.open('https://wa.me/' + waNumber(c.phone) + '?text=' + encodeURIComponent(
+    `Bonjour ${c.name}, il reste ${plainMoney(st.balance)} FCFA à régler à ${S.shop.name}. Merci de passer quand vous pourrez.`), '_blank', 'noopener');
+  const ed = $('#st-edit'); if (ed) ed.onclick = () => customerForm(c, () => viewStatement(id));
+  document.querySelectorAll('[data-pc]').forEach(b => b.onclick = () => {
+    $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet"><h2>Annuler le remboursement</h2>
+      <p class="muted" style="margin:0">À faire seulement en cas d'erreur de saisie. L'argent ressort de la caisse ; le propriétaire est prévenu.</p>
+      <label>Motif (obligatoire)<input id="pc-why" maxlength="200" required></label>
+      <div class="row"><button class="btn danger" type="submit">Annuler le remboursement</button><button class="btn ghost" type="button" id="cancel">Retour</button></div></form></div>`;
+    $('#cancel').onclick = closeSheet;
+    $('#sheet').onsubmit = async e2 => {
+      e2.preventDefault();
+      const { error: e3 } = await sb.rpc('cancel_customer_payment', { p_payment: b.dataset.pc, p_reason: $('#pc-why').value });
+      if (e3) return toast(cleanErr(e3), true);
+      closeSheet(); toast('Remboursement annulé.'); S.customers = null; viewStatement(id);
+    };
+  });
+}
+
+function paymentForm(c, balance) {
+  const ref = uuid();                  // même référence si on appuie deux fois : compté une seule fois
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Remboursement">
+    <h2>Remboursement : ${esc(c.name)}</h2>
+    <div class="muted">Doit actuellement ${money(balance)}</div>
+    <label>Montant reçu (FCFA)<input id="py-amt" type="number" inputmode="numeric" min="1" max="${esc(balance)}" step="1" required value="${esc(balance)}"></label>
+    <label>Paiement<select id="py-m">${Object.entries(PAY).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+    <label>Remarque (facultatif)<input id="py-note" maxlength="200"></label>
+    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const amt = Math.round(Number($('#py-amt').value)), m = $('#py-m').value;
+    const { data, error } = await sb.rpc('add_customer_payment', { p_customer: c.id, p_amount: amt, p_method: m,
+      p_note: $('#py-note').value || null, p_client_ref: ref });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    S.customers = null;
+    receiptSheet({ shop: S.shop, customer: c, amount: amt, method: m, balance: data.balance, date: new Date().toISOString(), who: S.shop.who });
+  };
+}
+
+// Reçu de remboursement : à l'écran, en PDF ou par WhatsApp.
+function receiptText(r) {
+  return [r.shop.name, `Reçu de paiement du ${dtFull(r.date)}`, `Client : ${r.customer.name}`, `Montant reçu : ${plainMoney(r.amount)} FCFA (${PAY[r.method] || ''})`,
+    r.balance > 0 ? `Reste à payer : ${plainMoney(r.balance)} FCFA` : 'Tout est réglé. Merci !', ...(r.shop.footer ? ['', r.shop.footer] : [])].join('\n');
+}
+function receiptPdf(r) {
+  const pdf = newPdf(), L = 40, R = 555;
+  pdf.page();
+  pdf.text(L, 62, r.shop.name, { size: 20, bold: true, color: GREEN });
+  let y = 80;
+  if (r.shop.address) { pdf.text(L, y, r.shop.address, { size: 10, color: GREY }); y += 14; }
+  if (r.shop.phone) { pdf.text(L, y, 'Tél. : ' + r.shop.phone, { size: 10, color: GREY }); y += 14; }
+  pdf.text(R, 62, 'REÇU', { size: 20, bold: true, align: 'right' });
+  pdf.text(R, 80, dtFull(r.date), { size: 10, align: 'right', color: GREY });
+  y = Math.max(y, 100) + 4; pdf.line(L, R, y, GREEN, 1.2); y += 26;
+  pdf.text(L, y, 'Client : ' + r.customer.name + (r.customer.phone ? '  (' + r.customer.phone + ')' : ''), { size: 11, bold: true }); y += 30;
+  pdf.text(L, y, 'Montant reçu', { size: 12 }); pdf.text(R, y, plainMoney(r.amount) + ' FCFA', { size: 14, bold: true, align: 'right' }); y += 20;
+  pdf.text(L, y, 'Paiement : ' + (PAY[r.method] || ''), { size: 10, color: GREY }); y += 26;
+  pdf.text(L, y, r.balance > 0 ? 'Reste à payer' : 'Solde', { size: 12, bold: true, color: r.balance > 0 ? RED : GREEN });
+  pdf.text(R, y, r.balance > 0 ? plainMoney(r.balance) + ' FCFA' : 'Tout est réglé', { size: 12, bold: true, align: 'right', color: r.balance > 0 ? RED : GREEN }); y += 30;
+  pdf.text(L, y, 'Reçu par : ' + (r.who || ''), { size: 10 });
+  if (r.shop.footer) pdf.text(pdf.W / 2, 790, r.shop.footer, { size: 10, align: 'center', color: GREY });
+  pdf.text(pdf.W / 2, 815, 'Établi avec Bara Gestion', { size: 7.5, align: 'center', color: [0.6, 0.64, 0.61] });
+  return pdf.build('Reçu ' + r.customer.name);
+}
+function receiptSheet(r) {
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Reçu">
+    <h2>Remboursement enregistré</h2>
+    <div class="card" style="display:grid;gap:4px"><div><b>${esc(r.customer.name)}</b></div>
+      <div>Reçu : <b>${esc(money(r.amount))}</b> (${esc(PAY[r.method] || '')})</div>
+      <div style="color:${r.balance > 0 ? 'var(--bad)' : 'inherit'};font-weight:600">${r.balance > 0 ? 'Reste à payer : ' + esc(money(r.balance)) : 'Tout est réglé ✓'}</div></div>
+    <div class="row"><button class="btn" id="rc-wa">Envoyer par WhatsApp</button><button class="btn ghost" id="rc-dl">Télécharger le PDF</button></div>
+    <button class="btn ghost" id="rc-close">Fermer</button></div></div>`;
+  const name = 'Recu-' + r.customer.name.replace(/[^A-Za-z0-9]+/g, '-') + '.pdf';
+  $('#rc-close').onclick = () => { closeSheet(); viewStatement(r.customer.id); };
+  $('#rc-dl').onclick = () => {
+    const url = URL.createObjectURL(new Blob([receiptPdf(r)], { type: 'application/pdf' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+  };
+  $('#rc-wa').onclick = async () => {
+    try {
+      const file = new File([receiptPdf(r)], name, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Reçu' }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    window.open('https://wa.me/' + waNumber(r.customer.phone) + '?text=' + encodeURIComponent(receiptText(r)), '_blank', 'noopener');
   };
 }
 
@@ -1389,6 +1642,7 @@ async function viewReport() {
         ${M('Nombre de ventes', d.sales_count, 1)}${M('Marge brute', d.gross_margin)}
         ${M('Dépenses', d.operating_expenses)}${M('Résultat estimé', d.net_estimate)}
         ${d.discounts != null ? M('Remises accordées', d.discounts) : ''}
+        ${d.repayments != null ? M('Remboursements reçus', d.repayments) : ''}${d.credit_outstanding != null ? M('Crédits en cours (total)', d.credit_outstanding) : ''}
       </div>
       ${d.low_stock_count > 0 ? `<div class="banner">${d.low_stock_count} produit(s) en stock bas.</div>` : ''}
       <p class="muted" style="font-size:13px">Le résultat est une estimation : marge brute moins dépenses et transport des achats. Les dates suivent l'heure du Burkina Faso (UTC).</p>
@@ -1461,7 +1715,8 @@ async function viewTeam() {
               <button class="btn ghost small" data-pw="${esc(m.user_id)}" ${canWrite() ? '' : 'disabled'}>Nouveau mot de passe</button>
               <button class="btn ghost small" data-act="${esc(m.user_id)}" data-to="${m.active ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${m.active ? 'Désactiver' : 'Réactiver'}</button>
               <button class="btn ${S.offAllowed[m.user_id] ? '' : 'ghost'} small" data-off="${esc(m.user_id)}" data-to="${S.offAllowed[m.user_id] ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${S.offAllowed[m.user_id] ? 'Hors ligne : autorisé' : 'Hors ligne : non autorisé'}</button>
-              <button class="btn ghost small" data-disc="${esc(m.user_id)}" ${canWrite() ? '' : 'disabled'}>Remise max : ${esc(String(S.discMap[m.user_id] || 0).replace('.', ','))} %</button></div>` : ''}
+              <button class="btn ghost small" data-disc="${esc(m.user_id)}" ${canWrite() ? '' : 'disabled'}>Remise max : ${esc(String(S.discMap[m.user_id] || 0).replace('.', ','))} %</button>
+              ${m.role === 'seller' ? `<button class="btn ${S.creditMap[m.user_id] ? '' : 'ghost'} small" data-cr="${esc(m.user_id)}" data-to="${S.creditMap[m.user_id] ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${S.creditMap[m.user_id] ? 'Crédit : autorisé' : 'Crédit : non autorisé'}</button>` : ''}</div>` : ''}
           </div>
         </div>`).join('')}</div>
     </section>${offlineAdminHtml()}`;
