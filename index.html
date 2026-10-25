@@ -160,7 +160,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-25g';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-25h';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -233,7 +233,7 @@ function startOffline(c) {
   S.offline = true; S.user = { id: c.userId }; S.role = c.role; S.shop = { ...c.shop };
   S.memberships = [{ shop_id: c.shop.id, role: c.role, display_name: c.shop.who, shops: { name: c.shop.name } }];
   S.products = c.products; S.costs = {}; S.sub = { status: 'offline' }; S.cachedAt = c.savedAt;
-  S.cart = new Map(); S.ref = uuid(); S.last = null; S.sales = null; S.summary = null; S.team = null; S.tab = 'sale';
+  S.cart = new Map(); S.ref = uuid(); S.last = null; S.editQuote = null; S.quotes = null; S.sales = null; S.summary = null; S.team = null; S.tab = 'sale';
   draw();
   // Le signal « réseau revenu » arrive parfois avant que la connexion soit utilisable : on réessaie.
   clearTimeout(S.retry);
@@ -449,7 +449,8 @@ const ALERT_TEXT = {
   cash_gap: (a, who) => `Écart de caisse : ${a.details.gap > 0 ? '+' : '−'} ${money(Math.abs(a.details.gap))} (attendu ${money(a.details.expected)}, compté ${money(a.details.counted)}). Caisse fermée par ${who}.`,
   credit_not_allowed: (a, who) => `${who} a vendu à crédit hors ligne sans autorisation : ${money(a.details.credit)} pour ${a.details.customer} (réf. ${a.details.ref}).`,
   credit_over: (a, who) => `Plafond de crédit dépassé hors ligne par ${who} : ${a.details.customer} (plafond ${money(a.details.limit)}, nouveau crédit ${money(a.details.credit)}).`,
-  payment_cancelled: (a, who) => `Remboursement annulé par ${who} : ${money(a.details.amount)} de ${a.details.customer} (${a.details.reason}).`,
+  payment_cancelled: (a, who) => `${a.details.kind === 'refund' ? 'Avance rendue annulée' : 'Dépôt annulé'} par ${who} : ${money(a.details.amount)} de ${a.details.customer} (${a.details.reason}).`,
+  advance_refund: (a, who) => `Avance rendue par ${who} : ${money(a.details.amount)} à ${a.details.customer} (${PAY[a.details.method] || ''}, motif : ${a.details.reason}).`,
   clock: (a, who) => `Heure incorrecte sur le téléphone de ${who} pour la vente ${a.details.ref}.`
 };
 
@@ -637,7 +638,7 @@ async function selectShop(id) {
     discMax: Number(m.discount_max_pct) || 0, creditAllowed: !!m.credit_allowed };
   S.role = m.role;
   storage.setItem('bg_shop', id);
-  S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
+  S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
   await Promise.all([loadProducts().then(() => canCredit() ? loadCustomers(true) : null), loadSub(), loadAlertCount(), loadCountState(), loadCash()]);
   draw();
@@ -809,6 +810,7 @@ function drawCart() {
   if (S.disc > sub) S.disc = 0;
   const total = sub - S.disc;
   const canDisc = S.role === 'owner' || (S.shop.discMax || 0) > 0;
+  const adv = S.offline ? 0 : advOf(S.custSel);
   const lines = [...S.cart].map(([id, q]) => {
     const p = S.products.find(x => x.id === id);
     return `<div class="cartline">
@@ -817,37 +819,48 @@ function drawCart() {
       <button class="btn ghost small" data-rm="${esc(id)}" aria-label="Retirer ${esc(p.name)}">Retirer</button>
     </div>`;
   }).join('');
-  el.innerHTML = `<h2>Panier</h2>${lines}
+  el.innerHTML = `<h2>${S.editQuote ? 'Modifier le devis ' + esc(quoteNo(S.editQuote.no)) : 'Panier'}</h2>${lines}
     ${canDisc ? `<div class="row" style="align-items:flex-end">
       <label>Remise (FCFA)<input id="disc" type="number" inputmode="numeric" min="0" step="1" value="${S.disc || ''}" placeholder="0"></label>
       <div class="muted" id="disc-info" style="font-size:13px;padding-bottom:12px">${discInfo(sub)}</div></div>` : ''}
     <div class="total"><span>Total</span><span class="num" id="total">${money(total)}</span></div>
-    <div class="row">
+    ${S.editQuote ? '' : `<div class="row">
       <label>Montant encaissé (FCFA)<input id="paid" type="number" inputmode="numeric" min="0" step="1" value="${total}"></label>
       <label>Paiement<select id="pay">${Object.entries(PAY).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-    </div>
+    </div>`}
     <div class="row" style="align-items:center;flex-wrap:nowrap"><div style="flex:1 1 auto;min-width:0">
-      <div class="muted" style="font-size:13px">Client (obligatoire pour un crédit)</div>
+      <div class="muted" style="font-size:13px">${S.editQuote ? 'Client du devis' : 'Client (obligatoire pour un crédit ou une avance)'}</div>
       <div id="cust-sel" style="font-weight:600">${S.custSel ? esc(S.custSel.name) + ' <span class="muted" style="font-weight:400">' + esc(S.custSel.phone || '') + '</span>' : '<span class="muted" style="font-weight:400">aucun</span>'}</div></div>
       <button class="btn ghost small" type="button" id="cust-pick" style="flex:0 0 auto">${S.custSel ? 'Changer' : 'Choisir'}</button></div>
-    <div class="row"><button class="btn" id="validate" ${canWrite() || canSellOffline() ? '' : 'disabled'}>${S.offline ? 'Valider (hors ligne)' : 'Valider la vente'}</button>
-      <button class="btn ghost" id="clear">Vider</button></div>`;
+    ${adv && !S.editQuote ? `<div class="banner ok" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Avance de ${esc(S.custSel.name)} : <b>${money(adv)}</b>
+      <button class="btn small" type="button" id="use-adv">Payer avec l'avance</button></div>` : ''}
+    ${S.editQuote ? `<div class="row"><button class="btn" id="q-save" ${canWrite() ? '' : 'disabled'}>Enregistrer le devis ${esc(quoteNo(S.editQuote.no))}</button>
+      <button class="btn ghost" id="q-drop">Abandonner</button></div>`
+    : `<div class="row"><button class="btn" id="validate" ${canWrite() || canSellOffline() ? '' : 'disabled'}>${S.offline ? 'Valider (hors ligne)' : 'Valider la vente'}</button>
+      ${S.offline ? '' : `<button class="btn ghost" id="mk-quote" ${canWrite() ? '' : 'disabled'}>Faire un devis</button>`}
+      <button class="btn ghost" id="clear">Vider</button></div>`}`;
   el.querySelectorAll('[data-qty]').forEach(i => i.onchange = () => {
     const v = Number(i.value);
     if (!(v > 0)) S.cart.delete(i.dataset.qty); else S.cart.set(i.dataset.qty, v);
     drawCart();
   });
   el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.cart.delete(b.dataset.rm); drawCart(); });
-  $('#clear').onclick = () => { S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; drawCart(); };
+  const cl = $('#clear'); if (cl) cl.onclick = () => { S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; drawCart(); };
   $('#cust-pick').onclick = pickCustomer;
   const di = $('#disc');
   if (di) di.oninput = () => {
     const v = Math.round(Number(di.value) || 0);
     S.disc = v > 0 ? v : 0;
     const t = sub - Math.min(S.disc, sub);
-    $('#total').textContent = money(t); $('#paid').value = t; $('#disc-info').innerHTML = discInfo(sub);
+    $('#total').textContent = money(t); if ($('#paid')) $('#paid').value = t; $('#disc-info').innerHTML = discInfo(sub);
   };
-  $('#validate').onclick = submitSale;
+  const ua = $('#use-adv');
+  if (ua) ua.onclick = () => { const t = sub - Math.min(S.disc || 0, sub); $('#paid').value = Math.max(0, t - adv);
+    toast(t > adv ? `L'avance paie ${money(adv)}. Reste à encaisser : ${money(t - adv)}.` : `Tout est payé avec l'avance. Il restera ${money(adv - t)} d'avance.`); };
+  const v = $('#validate'); if (v) v.onclick = submitSale;
+  const mq = $('#mk-quote'); if (mq) mq.onclick = () => saveQuote(null);
+  const qs = $('#q-save'); if (qs) qs.onclick = () => saveQuote(S.editQuote.id);
+  const qd = $('#q-drop'); if (qd) qd.onclick = () => { S.editQuote = null; S.cart.clear(); S.disc = 0; S.custSel = null; S.ref = uuid(); drawCart(); };
 }
 
 async function submitSale() {
@@ -859,7 +872,12 @@ async function submitSale() {
   const pay = $('#pay').value, customer = S.custSel;
   if (paid < total) {
     if (!customer) { S.busy = false; toast('Vente à crédit : choisissez le client (avec son téléphone).', true); return drawCart(); }
-    if (!canCredit()) { S.busy = false; toast('Vente à crédit non autorisée pour vous : demandez au propriétaire.', true); return drawCart(); }
+    const adv = S.offline ? 0 : advOf(customer);
+    if (!canCredit() && total - paid > adv) {
+      S.busy = false;
+      toast(adv ? `Avance insuffisante : ${customer.name} a ${money(adv)} d'avance, il manque ${money(total - paid - adv)}.` : 'Vente à crédit non autorisée pour vous : demandez au propriétaire.', true);
+      return drawCart();
+    }
   }
   const dErr = discError(sub, disc);
   if (dErr) { S.busy = false; toast(dErr, true); return drawCart(); }
@@ -1274,7 +1292,7 @@ async function viewCash() {
   $('#view').innerHTML = `<section class="card stack"><h2>Caisse ouverte</h2>
       <div class="muted" style="font-size:13.5px">Depuis ${dt(S.cash.opened_at)} · ouverte par ${who(S.cash.opened_by)}</div>
       ${cur ? `<div class="stack" style="gap:4px">${L('Fonds de caisse', cur.opening_float)}${L('Ventes en espèces', cur.cash_sales)}
-        ${cur.repayments ? L('Remboursements de crédit', cur.repayments) : ''}
+        ${cur.repayments ? L('Dépôts des clients (dettes et avances)', cur.repayments) : ''}${cur.advance_refunds ? L('Avances rendues', cur.advance_refunds, false, true) : ''}
         ${cur.cash_refunds ? L('Ventes annulées (argent rendu)', cur.cash_refunds, false, true) : ''}${cur.deposits ? L('Dépôts', cur.deposits) : ''}
         ${cur.expenses_cash ? L('Dépenses payées en caisse', cur.expenses_cash, false, true) : ''}${cur.withdrawals ? L('Retraits', cur.withdrawals, false, true) : ''}
         <div class="total"><span>Attendu dans la caisse</span><span class="num">${money(cur.expected)}</span></div>
@@ -1374,19 +1392,19 @@ async function pickCustomer() {
     <h2>Choisir le client</h2>
     <input id="pk-q" type="search" placeholder="Nom ou téléphone" autocomplete="off">
     <div class="plist" id="pk-list" style="max-height:45vh;overflow:auto"></div>
-    ${canCredit() && !S.offline ? '<button class="btn ghost" id="pk-new">+ Nouveau client</button>' : ''}
+    ${!S.offline ? '<button class="btn ghost" id="pk-new">+ Nouveau client</button>' : ''}
     ${S.offline ? '<p class="muted" style="margin:0;font-size:13px">Hors ligne : seulement les clients déjà enregistrés.</p>' : ''}
     <div class="row"><button class="btn ghost" id="pk-none">Sans client</button><button class="btn ghost" id="cancel">Fermer</button></div></div></div>`;
   const draw1 = () => {
     const t = ($('#pk-q').value || '').trim().toLowerCase(), td = t.replace(/[^0-9]/g, '');
     const rows = list.filter(c => c.active !== false && (!t || c.name.toLowerCase().includes(t) || (td && (c.phone || '').includes(td)))).slice(0, 50);
     $('#pk-list').innerHTML = rows.map(c => `<button class="prod" data-pk="${esc(c.id)}"><span><span class="nm">${esc(c.name)}</span><br>
-      <span class="sub">${esc(c.phone || 'sans téléphone')}</span></span><span class="pr" style="${c.balance > 0 ? 'color:var(--bad)' : ''}">${c.balance > 0 ? 'doit ' + money(c.balance) : ''}</span></button>`).join('')
+      <span class="sub">${esc(c.phone || 'sans téléphone')}</span></span>${balTag(c.balance)}</button>`).join('')
       || '<p class="empty">Aucun client trouvé.</p>';
     document.querySelectorAll('[data-pk]').forEach(b => b.onclick = () => {
       const c = list.find(x => x.id === b.dataset.pk);
       if (!c.phone) return toast('Ajoutez d\'abord le téléphone de ce client (onglet Clients, Modifier).', true);
-      S.custSel = { id: c.id, name: c.name, phone: c.phone }; closeSheet(); drawCart();
+      S.custSel = { id: c.id, name: c.name, phone: c.phone, balance: c.balance }; closeSheet(); drawCart();
     });
   };
   draw1();
@@ -1394,8 +1412,16 @@ async function pickCustomer() {
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#pk-none').onclick = () => { S.custSel = null; closeSheet(); drawCart(); };
-  const nw = $('#pk-new'); if (nw) nw.onclick = () => customerForm(null, c => { S.custSel = { id: c.id, name: c.name, phone: c.phone }; drawCart(); });
+  const nw = $('#pk-new'); if (nw) nw.onclick = () => customerForm(null, c => { S.custSel = { id: c.id, name: c.name, phone: c.phone, balance: c.balance }; drawCart(); });
 }
+
+// Solde d'un client : positif = il doit (rouge) ; négatif = avance qu'on garde pour lui (vert).
+function balTag(b) {
+  if (b > 0) return `<span class="pr" style="color:var(--bad)">doit ${money(b)}</span>`;
+  if (b < 0) return `<span class="pr" style="color:var(--accent)">avance ${money(-b)}</span>`;
+  return '<span class="pr">✓</span>';
+}
+const advOf = c => (c && c.balance < 0 ? -c.balance : 0);
 
 // Nouveau client (ou modification par le propriétaire / gérant).
 function customerForm(c, after) {
@@ -1431,101 +1457,156 @@ async function viewClients() {
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
   const list = await loadCustomers(true);
   const debt = list.reduce((a, c) => a + Math.max(0, c.balance), 0);
-  if (S.cOnlyDebt === undefined) S.cOnlyDebt = true;
+  const held = list.reduce((a, c) => a + Math.max(0, -c.balance), 0);
+  if (!['debt', 'adv', 'all'].includes(S.cFilter)) S.cFilter = 'debt';
+  const F = [['debt', 'Ils doivent'], ['adv', 'Avances'], ['all', 'Tous']];
   $('#view').innerHTML = `<section class="card stack">
-      <div class="row"><h2 style="flex:1 1 auto">Clients</h2>${canCredit() ? `<button class="btn small" id="cl-new" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau client</button>` : ''}</div>
-      <div class="metric"><span>Total à récupérer (crédits en cours)</span><b style="color:${debt ? 'var(--bad)' : 'inherit'}">${money(debt)}</b></div>
+      <div class="row"><h2 style="flex:1 1 auto">Clients</h2><button class="btn small" id="cl-new" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau client</button></div>
+      <div class="grid2"><div class="metric"><span>Ils doivent</span><b style="color:${debt ? 'var(--bad)' : 'inherit'}">${money(debt)}</b></div>
+        <div class="metric"><span>Avances gardées</span><b style="color:${held ? 'var(--accent)' : 'inherit'}">${money(held)}</b></div></div>
       <input id="cl-q" type="search" placeholder="Nom ou téléphone" autocomplete="off">
-      <div class="seg"><button class="btn small ${S.cOnlyDebt ? '' : 'ghost'}" id="cl-d">Ceux qui doivent</button><button class="btn small ${S.cOnlyDebt ? 'ghost' : ''}" id="cl-a">Tous</button></div>
+      <div class="seg">${F.map(([k, l]) => `<button class="btn small ${S.cFilter === k ? '' : 'ghost'}" data-cf="${k}">${l}</button>`).join('')}</div>
       <div class="plist" id="cl-list"></div></section>`;
   const draw1 = () => {
     const t = ($('#cl-q').value || '').trim().toLowerCase(), td = t.replace(/[^0-9]/g, '');
-    const rows = list.filter(c => (!S.cOnlyDebt || c.balance > 0) && (!t || c.name.toLowerCase().includes(t) || (td && (c.phone || '').includes(td))));
+    const keep = c => S.cFilter === 'all' || (S.cFilter === 'debt' ? c.balance > 0 : c.balance < 0);
+    const rows = list.filter(c => keep(c) && (!t || c.name.toLowerCase().includes(t) || (td && (c.phone || '').includes(td))));
     $('#cl-list').innerHTML = rows.map(c => `<button class="prod" data-cl="${esc(c.id)}" style="${c.active === false ? 'opacity:.6' : ''}">
       <span><span class="nm">${esc(c.name)}</span><br><span class="sub">${esc(c.phone || '⚠ téléphone manquant')}${c.credit_limit != null ? ' · plafond ' + money(c.credit_limit) : ''}</span></span>
-      <span class="pr" style="${c.balance > 0 ? 'color:var(--bad)' : ''}">${c.balance > 0 ? money(c.balance) : '✓'}</span></button>`).join('')
-      || `<p class="empty">${S.cOnlyDebt ? 'Personne ne doit d\'argent.' : 'Aucun client.'}</p>`;
+      ${balTag(c.balance)}</button>`).join('')
+      || `<p class="empty">${S.cFilter === 'debt' ? 'Personne ne doit d\'argent.' : S.cFilter === 'adv' ? 'Aucune avance.' : 'Aucun client.'}</p>`;
     document.querySelectorAll('[data-cl]').forEach(b => b.onclick = () => viewStatement(b.dataset.cl));
   };
   draw1();
   $('#cl-q').oninput = draw1;
-  $('#cl-d').onclick = () => { S.cOnlyDebt = true; viewClients(); };
-  $('#cl-a').onclick = () => { S.cOnlyDebt = false; viewClients(); };
-  const nw = $('#cl-new'); if (nw) nw.onclick = () => customerForm(null, () => viewClients());
+  document.querySelectorAll('[data-cf]').forEach(b => b.onclick = () => { S.cFilter = b.dataset.cf; viewClients(); });
+  $('#cl-new').onclick = () => customerForm(null, () => viewClients());
 }
 
 async function viewStatement(id) {
   const { data: st, error } = await sb.rpc('customer_statement', { p_customer: id });
   if (error) return toast(cleanErr(error), true);
   await ensureNames();
-  const c = st.customer, mgr = isManager();
-  // Ventes et remboursements, du plus récent au plus ancien.
+  const c = st.customer, mgr = isManager(), b = st.balance;
+  // Ventes non payées comptant, dépôts et avances rendues, du plus récent au plus ancien.
   const ev = [
-    ...st.sales.filter(s => s.status === 'completed' && s.paid < s.total || s.status === 'cancelled' && s.paid < s.total)
-      .map(s => ({ at: s.created_at, html: `<div class="row" style="font-size:14px${s.status === 'cancelled' ? ';opacity:.55;text-decoration:line-through' : ''}"><span>${dt(s.created_at)} · Facture ${esc(invNo(s.invoice_no))}<br><span class="muted">total ${money(s.total)}, payé ${money(s.paid)}</span></span><b style="color:var(--bad)">+ ${money(s.total - s.paid)}</b></div>` })),
-    ...st.payments.map(p => ({ at: p.created_at, html: `<div class="row" style="font-size:14px${p.cancelled_at ? ';opacity:.55' : ''}"><span>${dt(p.created_at)} · remboursement ${esc(PAY[p.method] || '')}${p.cancelled_at ? `<br><span class="muted">annulé : ${esc(p.cancel_reason || '')}</span>` : ''}</span>
-      <span style="text-align:right"><b>− ${money(p.amount)}</b>${mgr && !p.cancelled_at ? `<br><button class="btn ghost small" data-pc="${esc(p.id)}">Annuler</button>` : ''}</span></div>` }))
-  ].sort((a, b) => b.at.localeCompare(a.at));
+    ...st.sales.filter(s => s.paid < s.total)
+      .map(s => ({ at: s.created_at, html: `<div class="row" style="font-size:14px${s.status === 'cancelled' ? ';opacity:.55;text-decoration:line-through' : ''}"><span>${dt(s.created_at)} · Facture ${esc(invNo(s.invoice_no))}<br><span class="muted">total ${money(s.total)}, payé ${money(s.paid)}${s.advance_used ? ', sur l\'avance ' + money(s.advance_used) : ''}</span></span><b style="color:var(--bad)">+ ${money(s.total - s.paid)}</b></div>` })),
+    ...st.payments.map(p => ({ at: p.created_at, html: `<div class="row" style="font-size:14px${p.cancelled_at ? ';opacity:.55' : ''}"><span>${dt(p.created_at)} · ${p.kind === 'refund' ? 'avance rendue' : 'dépôt'} ${esc(PAY[p.method] || '')}${p.kind === 'refund' && p.note ? `<br><span class="muted">${esc(p.note)}</span>` : ''}${p.cancelled_at ? `<br><span class="muted">annulé : ${esc(p.cancel_reason || '')}</span>` : ''}</span>
+      <span style="text-align:right"><b style="color:${p.kind === 'refund' ? 'var(--bad)' : 'var(--accent)'}">${p.kind === 'refund' ? '+' : '−'} ${money(p.amount)}</b>${mgr && !p.cancelled_at ? `<br><button class="btn ghost small" data-pc="${esc(p.id)}" data-pk="${esc(p.kind)}">Annuler</button>` : ''}</span></div>` }))
+  ].sort((x, y) => y.at.localeCompare(x.at));
+  const openQ = (st.quotes || []).filter(q => q.status === 'open');
   $('#view').innerHTML = `<section class="card stack">
       <h2>${esc(c.name)}</h2>
       <div class="muted">${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : '⚠ téléphone manquant'}${c.credit_limit != null ? ' · plafond ' + money(c.credit_limit) : ''}${c.note ? ' · ' + esc(c.note) : ''}</div>
-      <div class="metric"><span>Reste à payer</span><b style="color:${st.balance > 0 ? 'var(--bad)' : 'inherit'}">${money(Math.max(0, st.balance))}</b></div>
-      <div class="row">${st.balance > 0 ? `<button class="btn" id="st-pay" ${canWrite() ? '' : 'disabled'}>Remboursement</button>` : ''}
-        ${st.balance > 0 && c.phone ? '<button class="btn ghost" id="st-wa">Rappel WhatsApp</button>' : ''}</div>
+      ${b < 0 ? `<div class="metric"><span>Avance disponible</span><b style="color:var(--accent)">${money(-b)}</b></div>`
+              : `<div class="metric"><span>Reste à payer</span><b style="color:${b > 0 ? 'var(--bad)' : 'inherit'}">${money(Math.max(0, b))}</b></div>`}
+      <div class="row"><button class="btn" id="st-pay" ${canWrite() ? '' : 'disabled'}>Dépôt d'argent</button>
+        ${b > 0 && c.phone ? '<button class="btn ghost" id="st-wa">Rappel WhatsApp</button>' : ''}
+        ${b < 0 && mgr ? `<button class="btn ghost" id="st-ref" ${canWrite() ? '' : 'disabled'}>Rendre l'avance</button>` : ''}</div>
+      ${openQ.length ? `<div class="stack" style="gap:6px">${openQ.map(q => `<button class="btn ghost small" data-sq="${esc(q.id)}">Devis ${esc(quoteNo(q.quote_no))} · ${money(q.total)} · jusqu'au ${dDay(q.valid_until)}</button>`).join('')}</div>` : ''}
       ${mgr ? '<button class="btn ghost small" id="st-edit">Modifier le client</button>' : ''}
       <button class="btn ghost" id="st-back">Retour aux clients</button></section>
-    <section class="card stack"><h3 style="margin:0">Crédits et remboursements</h3>${ev.map(e => e.html).join('') || '<p class="muted" style="margin:0">Aucun crédit.</p>'}</section>`;
+    <section class="card stack"><h3 style="margin:0">Crédits, dépôts et avances</h3>${ev.map(e => e.html).join('') || '<p class="muted" style="margin:0">Rien pour le moment.</p>'}</section>`;
   $('#st-back').onclick = viewClients;
-  const pb = $('#st-pay'); if (pb) pb.onclick = () => paymentForm(c, st.balance);
+  $('#st-pay').onclick = () => paymentForm(c, b);
+  const rf = $('#st-ref'); if (rf) rf.onclick = () => refundForm(c, -b);
   const wa = $('#st-wa');
   if (wa) wa.onclick = () => window.open('https://wa.me/' + waNumber(c.phone) + '?text=' + encodeURIComponent(
-    `Bonjour ${c.name}, il reste ${plainMoney(st.balance)} FCFA à régler à ${S.shop.name}. Merci de passer quand vous pourrez.`), '_blank', 'noopener');
+    `Bonjour ${c.name}, il reste ${plainMoney(b)} FCFA à régler à ${S.shop.name}. Merci de passer quand vous pourrez.`), '_blank', 'noopener');
   const ed = $('#st-edit'); if (ed) ed.onclick = () => customerForm(c, () => viewStatement(id));
-  document.querySelectorAll('[data-pc]').forEach(b => b.onclick = () => {
-    $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet"><h2>Annuler le remboursement</h2>
-      <p class="muted" style="margin:0">À faire seulement en cas d'erreur de saisie. L'argent ressort de la caisse ; le propriétaire est prévenu.</p>
+  document.querySelectorAll('[data-sq]').forEach(x => x.onclick = () => quoteSheet(x.dataset.sq));
+  document.querySelectorAll('[data-pc]').forEach(x => x.onclick = () => {
+    const isRef = x.dataset.pk === 'refund';
+    $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet"><h2>${isRef ? 'Annuler l\'avance rendue' : 'Annuler le dépôt'}</h2>
+      <p class="muted" style="margin:0">À faire seulement en cas d'erreur de saisie. ${isRef ? 'L\'argent revient dans la caisse' : 'L\'argent ressort de la caisse'} ; le propriétaire est prévenu.</p>
       <label>Motif (obligatoire)<input id="pc-why" maxlength="200" required></label>
-      <div class="row"><button class="btn danger" type="submit">Annuler le remboursement</button><button class="btn ghost" type="button" id="cancel">Retour</button></div></form></div>`;
+      <div class="row"><button class="btn danger" type="submit">Annuler</button><button class="btn ghost" type="button" id="cancel">Retour</button></div></form></div>`;
     $('#cancel').onclick = closeSheet;
     $('#sheet').onsubmit = async e2 => {
       e2.preventDefault();
-      const { error: e3 } = await sb.rpc('cancel_customer_payment', { p_payment: b.dataset.pc, p_reason: $('#pc-why').value });
+      const { error: e3 } = await sb.rpc('cancel_customer_payment', { p_payment: x.dataset.pc, p_reason: $('#pc-why').value });
       if (e3) return toast(cleanErr(e3), true);
-      closeSheet(); toast('Remboursement annulé.'); S.customers = null; viewStatement(id);
+      closeSheet(); toast('Annulé.'); S.customers = null; viewStatement(id);
     };
   });
 }
 
+// Dépôt d'argent : paie d'abord la dette ; le reste devient une avance (tout membre).
 function paymentForm(c, balance) {
   const ref = uuid();                  // même référence si on appuie deux fois : compté une seule fois
-  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Remboursement">
-    <h2>Remboursement : ${esc(c.name)}</h2>
-    <div class="muted">Doit actuellement ${money(balance)}</div>
-    <label>Montant reçu (FCFA)<input id="py-amt" type="number" inputmode="numeric" min="1" max="${esc(balance)}" step="1" required value="${esc(balance)}"></label>
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Dépôt d'argent">
+    <h2>Dépôt : ${esc(c.name)}</h2>
+    <div class="muted">${balance > 0 ? 'Doit actuellement ' + money(balance) : balance < 0 ? 'Avance actuelle ' + money(-balance) : 'Ne doit rien'}</div>
+    <p class="muted" style="margin:0;font-size:13px">L'argent paie d'abord la dette. Le reste est gardé comme avance pour ses prochains achats.</p>
+    <label>Montant reçu (FCFA)<input id="py-amt" type="number" inputmode="numeric" min="1" step="1" required value="${balance > 0 ? esc(balance) : ''}"></label>
+    <div class="muted" id="py-split" style="font-size:13.5px"></div>
     <label>Paiement<select id="py-m">${Object.entries(PAY).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-    <label>Remarque (facultatif)<input id="py-note" maxlength="200"></label>
+    <label>Remarque (facultatif)<input id="py-note" maxlength="200" placeholder="ex. pour le chantier"></label>
+    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  const split = () => {
+    const a = Math.round(Number($('#py-amt').value) || 0), d = Math.min(Math.max(balance, 0), a);
+    $('#py-split').textContent = a > 0 ? (d ? `Dette payée : ${money(d)}` : '') + (d && a - d ? ' · ' : '') + (a - d ? `Avance : ${money(a - d)}` : '') : '';
+  };
+  split(); $('#py-amt').oninput = split;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]');
+    const amt = Math.round(Number($('#py-amt').value)), m = $('#py-m').value;
+    if (!(amt > 0)) return toast('Montant invalide.', true);
+    if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Confirmer : ${plainMoney(amt)} FCFA reçus`; return; }
+    btn.disabled = true;
+    const { data, error } = await sb.rpc('add_customer_payment', { p_customer: c.id, p_amount: amt, p_method: m,
+      p_note: $('#py-note').value || null, p_client_ref: ref });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    S.customers = null;
+    receiptSheet({ kind: 'payment', shop: S.shop, customer: c, amount: amt, method: m, balance: data.balance,
+      toDebt: data.to_debt, toAdv: data.to_advance, date: new Date().toISOString(), who: S.shop.who });
+  };
+}
+
+// Rendre une avance : propriétaire ou gérant, motif obligatoire.
+function refundForm(c, adv) {
+  const ref = uuid();
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Rendre l'avance">
+    <h2>Rendre l'avance : ${esc(c.name)}</h2>
+    <div class="muted">Avance actuelle ${money(adv)}</div>
+    <label>Montant rendu (FCFA)<input id="rf-amt" type="number" inputmode="numeric" min="1" max="${esc(adv)}" step="1" required value="${esc(adv)}"></label>
+    <label>Paiement<select id="rf-m">${Object.entries(PAY).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+    <label>Motif (obligatoire)<input id="rf-why" maxlength="200" required placeholder="ex. chantier annulé"></label>
+    ${S.role !== 'owner' ? '<p class="muted" style="margin:0;font-size:13px">Le propriétaire sera prévenu.</p>' : ''}
     <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#sheet').onsubmit = async ev => {
     ev.preventDefault();
-    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
-    const amt = Math.round(Number($('#py-amt').value)), m = $('#py-m').value;
-    const { data, error } = await sb.rpc('add_customer_payment', { p_customer: c.id, p_amount: amt, p_method: m,
-      p_note: $('#py-note').value || null, p_client_ref: ref });
-    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
-    S.customers = null;
-    receiptSheet({ shop: S.shop, customer: c, amount: amt, method: m, balance: data.balance, date: new Date().toISOString(), who: S.shop.who });
+    const btn = ev.target.querySelector('[type=submit]');
+    const amt = Math.round(Number($('#rf-amt').value)), m = $('#rf-m').value;
+    if (!(amt > 0)) return toast('Montant invalide.', true);
+    if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Confirmer : ${plainMoney(amt)} FCFA rendus`; return; }
+    btn.disabled = true;
+    const { data, error } = await sb.rpc('refund_advance', { p_customer: c.id, p_amount: amt, p_method: m,
+      p_reason: $('#rf-why').value, p_client_ref: ref });
+    if (error) { btn.disabled = false; btn.dataset.sure = ''; btn.textContent = 'Enregistrer'; return toast(cleanErr(error), true); }
+    S.customers = null; S.summary = null;
+    receiptSheet({ kind: 'refund', shop: S.shop, customer: c, amount: amt, method: m, balance: data.balance,
+      date: new Date().toISOString(), who: S.shop.who });
   };
 }
 
-// Reçu de remboursement : à l'écran, en PDF ou par WhatsApp.
+// Reçu (dépôt ou avance rendue) : à l'écran, en PDF ou par WhatsApp.
+const balLine = b => b > 0 ? `Reste à payer : ${plainMoney(b)} FCFA` : b < 0 ? `Avance disponible : ${plainMoney(-b)} FCFA` : 'Tout est réglé. Merci !';
 function receiptText(r) {
-  return [r.shop.name, `Reçu de paiement du ${dtFull(r.date)}`, `Client : ${r.customer.name}`, `Montant reçu : ${plainMoney(r.amount)} FCFA (${PAY[r.method] || ''})`,
-    r.balance > 0 ? `Reste à payer : ${plainMoney(r.balance)} FCFA` : 'Tout est réglé. Merci !', ...(r.shop.footer ? ['', r.shop.footer] : [])].join('\n');
+  const ref = r.kind === 'refund';
+  return [r.shop.name, `Reçu du ${dtFull(r.date)}`, `Client : ${r.customer.name}`,
+    ref ? `Avance rendue au client : ${plainMoney(r.amount)} FCFA (${PAY[r.method] || ''})` : `Montant reçu : ${plainMoney(r.amount)} FCFA (${PAY[r.method] || ''})`,
+    ...(!ref && r.toDebt && r.toAdv ? [`Dont dette payée : ${plainMoney(r.toDebt)} FCFA, avance : ${plainMoney(r.toAdv)} FCFA`] : []),
+    balLine(r.balance), ...(r.shop.footer ? ['', r.shop.footer] : [])].join('\n');
 }
 function receiptPdf(r) {
-  const pdf = newPdf(), L = 40, R = 555;
+  const pdf = newPdf(), L = 40, R = 555, ref = r.kind === 'refund';
   pdf.page();
   pdf.text(L, 62, r.shop.name, { size: 20, bold: true, color: GREEN });
   let y = 80;
@@ -1535,21 +1616,28 @@ function receiptPdf(r) {
   pdf.text(R, 80, dtFull(r.date), { size: 10, align: 'right', color: GREY });
   y = Math.max(y, 100) + 4; pdf.line(L, R, y, GREEN, 1.2); y += 26;
   pdf.text(L, y, 'Client : ' + r.customer.name + (r.customer.phone ? '  (' + r.customer.phone + ')' : ''), { size: 11, bold: true }); y += 30;
-  pdf.text(L, y, 'Montant reçu', { size: 12 }); pdf.text(R, y, plainMoney(r.amount) + ' FCFA', { size: 14, bold: true, align: 'right' }); y += 20;
-  pdf.text(L, y, 'Paiement : ' + (PAY[r.method] || ''), { size: 10, color: GREY }); y += 26;
-  pdf.text(L, y, r.balance > 0 ? 'Reste à payer' : 'Solde', { size: 12, bold: true, color: r.balance > 0 ? RED : GREEN });
-  pdf.text(R, y, r.balance > 0 ? plainMoney(r.balance) + ' FCFA' : 'Tout est réglé', { size: 12, bold: true, align: 'right', color: r.balance > 0 ? RED : GREEN }); y += 30;
-  pdf.text(L, y, 'Reçu par : ' + (r.who || ''), { size: 10 });
+  pdf.text(L, y, ref ? 'Avance rendue au client' : 'Montant reçu', { size: 12 }); pdf.text(R, y, plainMoney(r.amount) + ' FCFA', { size: 14, bold: true, align: 'right' }); y += 20;
+  pdf.text(L, y, 'Paiement : ' + (PAY[r.method] || ''), { size: 10, color: GREY }); y += 20;
+  if (!ref && r.toDebt && r.toAdv) {
+    pdf.text(L, y, 'Dette payée : ' + plainMoney(r.toDebt) + ' FCFA · Avance : ' + plainMoney(r.toAdv) + ' FCFA', { size: 10 }); y += 20;
+  }
+  y += 6;
+  const owes = r.balance > 0, col = owes ? RED : GREEN;
+  pdf.text(L, y, owes ? 'Reste à payer' : r.balance < 0 ? 'Avance disponible' : 'Solde', { size: 12, bold: true, color: col });
+  pdf.text(R, y, r.balance ? plainMoney(Math.abs(r.balance)) + ' FCFA' : 'Tout est réglé', { size: 12, bold: true, align: 'right', color: col }); y += 30;
+  pdf.text(L, y, (ref ? 'Rendu par : ' : 'Reçu par : ') + (r.who || ''), { size: 10 });
   if (r.shop.footer) pdf.text(pdf.W / 2, 790, r.shop.footer, { size: 10, align: 'center', color: GREY });
   pdf.text(pdf.W / 2, 815, 'Établi avec Bara Gestion', { size: 7.5, align: 'center', color: [0.6, 0.64, 0.61] });
   return pdf.build('Reçu ' + r.customer.name);
 }
 function receiptSheet(r) {
+  const ref = r.kind === 'refund';
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Reçu">
-    <h2>Remboursement enregistré</h2>
+    <h2>${ref ? 'Avance rendue' : 'Dépôt enregistré'}</h2>
     <div class="card" style="display:grid;gap:4px"><div><b>${esc(r.customer.name)}</b></div>
-      <div>Reçu : <b>${esc(money(r.amount))}</b> (${esc(PAY[r.method] || '')})</div>
-      <div style="color:${r.balance > 0 ? 'var(--bad)' : 'inherit'};font-weight:600">${r.balance > 0 ? 'Reste à payer : ' + esc(money(r.balance)) : 'Tout est réglé ✓'}</div></div>
+      <div>${ref ? 'Rendu' : 'Reçu'} : <b>${esc(money(r.amount))}</b> (${esc(PAY[r.method] || '')})</div>
+      ${!ref && r.toDebt && r.toAdv ? `<div class="muted">Dette payée ${esc(money(r.toDebt))} · avance ${esc(money(r.toAdv))}</div>` : ''}
+      <div style="color:${r.balance > 0 ? 'var(--bad)' : r.balance < 0 ? 'var(--accent)' : 'inherit'};font-weight:600">${r.balance > 0 ? 'Reste à payer : ' + esc(money(r.balance)) : r.balance < 0 ? 'Avance disponible : ' + esc(money(-r.balance)) : 'Tout est réglé ✓'}</div></div>
     <div class="row"><button class="btn" id="rc-wa">Envoyer par WhatsApp</button><button class="btn ghost" id="rc-dl">Télécharger le PDF</button></div>
     <button class="btn ghost" id="rc-close">Fermer</button></div></div>`;
   const name = 'Recu-' + r.customer.name.replace(/[^A-Za-z0-9]+/g, '-') + '.pdf';
@@ -1568,9 +1656,177 @@ function receiptSheet(r) {
   };
 }
 
+/* ===== Devis =====
+   Proposition de prix numérotée (D-0001). Ne touche ni au stock ni à la caisse. Valable 15 jours.
+   Transformé en vente (en une ou plusieurs fois) : prix du devis s'il est encore valable. En ligne uniquement. */
+const quoteNo = n => 'D-' + String(n).padStart(4, '0');
+const dDay = s => { const [y, m, d] = String(s).slice(0, 10).split('-'); return `${d}/${m}/${y}`; };
+
+async function saveQuote(qid) {
+  if (S.busy) return;
+  if (!S.cart.size) return toast('Ajoutez des produits.', true);
+  const sub = cartTotal(), disc = S.disc || 0;
+  const dErr = discError(sub, disc); if (dErr) return toast(dErr, true);
+  S.busy = true;
+  const { data, error } = await sb.rpc('save_quote', { p_shop: S.shop.id,
+    p_items: [...S.cart].map(([product_id, quantity]) => ({ product_id, quantity })), p_discount: disc,
+    p_customer_id: S.custSel ? S.custSel.id : null, p_quote: qid });
+  S.busy = false;
+  if (error) return toast(cleanErr(error), true);
+  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null;
+  drawCart();
+  toast(`Devis ${quoteNo(data.quote_no)} enregistré : ${money(data.total)}.`);
+  quoteSheet(data.id);
+}
+
+async function viewQuotes() {
+  $('#view').innerHTML = '<p class="empty">Chargement…</p>';
+  if (!S.quotes) {
+    const { data, error } = await sb.rpc('quote_list', { p_shop: S.shop.id });
+    if (error) { $('#view').innerHTML = ''; return toast(cleanErr(error), true); }
+    S.quotes = data || [];
+  }
+  const tag = q => q.status === 'converted' ? '<span class="tag">Livré</span>' : q.status === 'cancelled' ? '<span class="tag bad">Annulé</span>'
+    : q.expired ? '<span class="tag warn">Expiré</span>' : q.partial ? '<span class="tag warn">En partie livré</span>' : '<span class="tag">Valable</span>';
+  $('#view').innerHTML = `${histSeg()}<section class="stack">
+    <p class="muted" style="margin:0;font-size:13.5px">Pour faire un devis : remplissez le panier dans « Vendre », puis « Faire un devis ».</p>
+    ${S.quotes.map(q => `<button class="prod" data-q="${esc(q.id)}" style="${q.status !== 'open' ? 'opacity:.65' : ''}">
+      <span><span class="nm">${esc(quoteNo(q.quote_no))} · ${esc(q.customer_name || 'sans client')}</span><br>
+      <span class="sub">${q.status === 'open' ? 'jusqu\'au ' + dDay(q.valid_until) : dt(q.created_at)} ${tag(q)}</span></span>
+      <span class="pr">${money(q.total)}</span></button>`).join('') || '<p class="empty">Aucun devis pour le moment.</p>'}</section>`;
+  bindHistSeg();
+  document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => quoteSheet(b.dataset.q));
+}
+
+function histSeg() {
+  return `<div class="seg" style="margin-bottom:10px"><button class="btn small ${S.histMode === 'quotes' ? 'ghost' : ''}" id="hs-s">Ventes</button>
+    <button class="btn small ${S.histMode === 'quotes' ? '' : 'ghost'}" id="hs-q">Devis</button></div>`;
+}
+function bindHistSeg() {
+  const a = $('#hs-s'), b = $('#hs-q');
+  if (a) a.onclick = () => { S.histMode = 'sales'; viewHistory(); };
+  if (b) b.onclick = () => { S.histMode = 'quotes'; viewQuotes(); };
+}
+
+async function quoteSheet(id) {
+  const { data: g, error } = await sb.rpc('quote_get', { p_quote: id });
+  if (error) return toast(cleanErr(error), true);
+  const q = g.quote, open = q.status === 'open', partial = g.lines.some(l => Number(l.qty_taken) > 0);
+  const mine = q.created_by === S.user.id || isManager();
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Devis">
+    <h2>Devis ${esc(quoteNo(q.quote_no))}</h2>
+    ${open && q.expired ? '<div class="banner">Devis expiré : à la vente, les prix du jour seront appliqués.</div>' : ''}
+    ${q.status === 'cancelled' ? '<div class="banner bad">Devis annulé.</div>' : q.status === 'converted' ? '<div class="banner ok">Devis entièrement livré.</div>' : ''}
+    <div class="card" style="display:grid;gap:4px">
+      <div class="muted">${esc(dtFull(q.created_at))}${open ? ' · valable jusqu\'au <b>' + dDay(q.valid_until) + '</b>' : ''}</div>
+      ${q.customer_name ? `<div>Client : <b>${esc(q.customer_name)}</b>${q.phone ? ' <span class="muted">' + esc(q.phone) + '</span>' : ''}</div>` : ''}
+      <ul style="margin:6px 0 0;padding-left:18px">${g.lines.map(l => `<li>${esc(plainQty(l.quantity))} ${esc(UNITS[l.unit] || '')} ${esc(l.name)} · ${esc(money(l.line_total))}
+        ${Number(l.qty_taken) > 0 ? `<span class="muted"> (déjà livré ${esc(plainQty(l.qty_taken))})</span>` : ''}
+        ${open && !q.expired && Number(l.current_price) !== Number(l.unit_price) ? `<span class="muted"> · prix du jour ${esc(money(l.current_price))}</span>` : ''}</li>`).join('')}</ul>
+      ${q.discount > 0 ? `<div class="muted">Remise : − ${esc(money(q.discount))}</div>` : ''}
+      <div class="total" style="margin-top:6px"><span>Total</span><span class="num">${esc(money(q.total))}</span></div>
+      ${g.sales.length ? `<div class="muted" style="font-size:13px">Ventes : ${g.sales.map(x => esc(invNo(x.invoice_no))).join(', ')}</div>` : ''}
+    </div>
+    <div class="row"><button class="btn ghost" id="qt-wa">Envoyer par WhatsApp</button><button class="btn ghost" id="qt-dl">PDF</button></div>
+    ${open ? `<button class="btn" id="qt-sell" ${canWrite() ? '' : 'disabled'}>Transformer en vente</button>` : ''}
+    ${open && mine ? `<div class="row">${partial ? '' : `<button class="btn ghost small" id="qt-edit" ${canWrite() ? '' : 'disabled'}>Modifier</button>`}
+      <button class="btn ghost small" id="qt-cancel" ${canWrite() ? '' : 'disabled'}>Annuler le devis</button></div>` : ''}
+    <button class="btn ghost" id="qt-close">Fermer</button></div></div>`;
+  const doc = quoteDoc(g);
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#qt-close').onclick = closeSheet;
+  $('#qt-dl').onclick = () => downloadInvoice(doc);
+  $('#qt-wa').onclick = () => shareInvoice(doc, q.phone);
+  const se = $('#qt-sell'); if (se) se.onclick = () => convertSheet(g);
+  const ed = $('#qt-edit'); if (ed) ed.onclick = async () => {
+    const missing = g.lines.filter(l => !l.active || !S.products.find(p => p.id === l.product_id));
+    if (missing.length) return toast('Produit retiré : ' + missing.map(l => l.name).join(', ') + '. Faites un nouveau devis.', true);
+    S.cart = new Map(g.lines.map(l => [l.product_id, Number(l.quantity)]));
+    S.disc = q.discount || 0;
+    S.custSel = null;
+    if (q.customer_id) { const c = (await loadCustomers()).find(x => x.id === q.customer_id); if (c) S.custSel = { id: c.id, name: c.name, phone: c.phone, balance: c.balance }; }
+    S.editQuote = { id: q.id, no: q.quote_no };
+    closeSheet(); S.tab = 'sale'; draw();
+    toast(q.expired ? 'Devis expiré : les prix du jour seront repris et il sera valable 15 jours de plus.' : 'Les prix du devis sont gardés. Modifiez puis enregistrez.');
+  };
+  const ca = $('#qt-cancel'); if (ca) ca.onclick = async () => {
+    if (!ca.dataset.sure) { ca.dataset.sure = '1'; ca.textContent = 'Confirmer l\'annulation'; return; }
+    const { error: e2 } = await sb.rpc('cancel_quote', { p_quote: q.id });
+    if (e2) return toast(cleanErr(e2), true);
+    closeSheet(); toast('Devis annulé.'); S.quotes = null; if (S.tab === 'history') viewQuotes();
+  };
+}
+
+// Document du devis : même mise en page que la facture.
+function quoteDoc(g) {
+  const q = g.quote;
+  return { kind: 'quote', shop: { name: S.shop.name, phone: S.shop.phone || '', address: S.shop.address || '', footer: S.shop.footer || '' },
+    num: quoteNo(q.quote_no), date: q.created_at, valid: q.valid_until, customer: q.customer_name || '', seller: '', pay: '', ref2: '',
+    lines: g.lines.map(l => ({ name: l.name, unit: UNITS[l.unit] || '', qty: l.quantity, price: l.unit_price, total: l.line_total })),
+    total: q.total, paid: q.total, discount: q.discount || 0, advance: 0 };
+}
+
+// Transformer en vente : tout ce qui reste, ou une partie (livraison en plusieurs fois).
+async function convertSheet(g) {
+  const q = g.quote, ref = uuid();
+  const rest = g.lines.filter(l => Number(l.quantity) > Number(l.qty_taken));
+  let cust = null;
+  if (q.customer_id) cust = (await loadCustomers(true)).find(x => x.id === q.customer_id) || null;
+  const adv = advOf(cust);
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Transformer en vente">
+    <h2>Vente du devis ${esc(quoteNo(q.quote_no))}</h2>
+    <p class="muted" style="margin:0;font-size:13.5px">${q.expired ? 'Devis expiré : prix du jour.' : 'Prix du devis.'} Le client peut prendre une partie maintenant et le reste plus tard.</p>
+    ${rest.map(l => `<label>${esc(l.name)} (reste ${esc(plainQty(Number(l.quantity) - Number(l.qty_taken)))} ${esc(UNITS[l.unit] || '')})
+      <input type="number" inputmode="decimal" min="0" step="${WHOLE.includes(l.unit) ? 1 : 0.001}" max="${esc(Number(l.quantity) - Number(l.qty_taken))}"
+        value="${esc(Number(l.quantity) - Number(l.qty_taken))}" data-cq="${esc(l.product_id)}"></label>`).join('')}
+    <div class="total"><span>Total estimé</span><span class="num" id="cq-total"></span></div>
+    ${adv ? `<label style="display:flex;align-items:center;gap:10px;font-size:14.5px"><input id="cq-adv" type="checkbox" checked style="width:22px;height:22px;margin:0">
+      Prendre sur l'avance de ${esc(cust.name)} (${money(adv)})</label>` : ''}
+    <div class="row"><label>Montant encaissé (FCFA)<input id="cq-paid" type="number" inputmode="numeric" min="0" step="1"></label>
+      <label>Paiement<select id="cq-pay">${Object.entries(PAY).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label></div>
+    <div class="row"><button class="btn" type="submit">Valider la vente</button><button class="btn ghost" type="button" id="cancel">Retour</button></div></form></div>`;
+  const price = l => q.expired ? Number((S.products.find(p => p.id === l.product_id) || {}).sell_price || l.current_price) : Number(l.unit_price);
+  const pick = () => [...document.querySelectorAll('[data-cq]')].map(i => ({ product_id: i.dataset.cq, quantity: Number(i.value) || 0 })).filter(x => x.quantity > 0);
+  const est = () => {
+    const items = pick(), all = items.length === rest.length && items.every(x => { const l = rest.find(r => r.product_id === x.product_id); return x.quantity >= Number(l.quantity) - Number(l.qty_taken); });
+    let sub = 0, part = 0;
+    items.forEach(x => { const l = g.lines.find(r => r.product_id === x.product_id); sub += Math.round(x.quantity * price(l)); part += Math.round(x.quantity * Number(l.unit_price)); });
+    const used = q.discount_used || 0, subQ = q.subtotal || 0;
+    const d = all ? q.discount - used : (subQ ? Math.min(Math.floor(q.discount * part / subQ), q.discount - used) : 0);
+    return Math.max(0, sub - d);
+  };
+  const upd = () => {
+    const t = est(); $('#cq-total').textContent = money(t);
+    const useAdv = $('#cq-adv') && $('#cq-adv').checked;
+    $('#cq-paid').value = useAdv ? Math.max(0, t - adv) : t;
+  };
+  upd();
+  document.querySelectorAll('[data-cq]').forEach(i => i.oninput = upd);
+  const ca = $('#cq-adv'); if (ca) ca.onchange = upd;
+  $('#cancel').onclick = () => quoteSheet(q.id);
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const items = pick();
+    if (!items.length) return toast('Choisissez au moins une quantité.', true);
+    const t = est(), paid = Math.round(Number($('#cq-paid').value));
+    if (!(paid >= 0)) return toast('Montant invalide.', true);
+    if (paid < t && !canCredit() && t - paid > adv) return toast(adv ? `Avance insuffisante : il manque ${money(t - paid - adv)}.` : 'Vente à crédit non autorisée pour vous.', true);
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const all = items.length === rest.length && items.every(x => { const l = rest.find(r => r.product_id === x.product_id); return x.quantity >= Number(l.quantity) - Number(l.qty_taken); });
+    const { data, error } = await sb.rpc('convert_quote', { p_quote: q.id, p_items: all ? null : items,
+      p_paid: paid >= t ? null : paid, p_payment_method: $('#cq-pay').value, p_client_ref: ref });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    S.quotes = null; S.sales = null; S.summary = null; S.customers = null;
+    await loadProducts();
+    toast(`Vente enregistrée : ${money(data.total)}${data.advance_used ? ` (dont ${money(data.advance_used)} pris sur l'avance)` : ''}.`);
+    openInvoice(data.sale_id);
+  };
+}
+
 /* ===== Onglet Historique ===== */
-const SALE_COLS = 'id,invoice_no,discount,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
+const SALE_COLS = 'id,invoice_no,discount,advance_used,quote_id,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
 async function viewHistory() {
+  if (S.histMode === 'quotes' && !S.offline) return viewQuotes();
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
   if (!S.sales) {
     const { data, error } = await sb.from('sales')
@@ -1585,7 +1841,7 @@ async function viewHistory() {
       ${waiting.map(r => `<div class="row" style="align-items:baseline"><b class="num">${money(r.total)}</b><span class="muted">${esc(r.offline_ref)}</span>
         <span class="muted" style="text-align:right">${dt(r.created_at)}</span></div>${r.error ? `<div class="muted" style="color:var(--bad)">${esc(r.error)}</div>` : ''}`).join('')}
       <button class="btn ghost small" id="sync-now">Envoyer maintenant</button></section>` : ''}
-    <section class="stack"><h2>${isManager() ? 'Dernières ventes' : 'Mes dernières ventes'}</h2>
+    ${S.offline ? '' : histSeg()}<section class="stack"><h2>${isManager() ? 'Dernières ventes' : 'Mes dernières ventes'}</h2>
     ${S.sales.map(s => `<article class="sale ${s.status === 'cancelled' ? 'cancelled' : ''}">
       <div class="row" style="align-items:baseline"><b class="num">${money(s.total)}</b><span class="muted" style="flex:0 0 auto">${esc(invNo(s.invoice_no))}</span>
         <span class="muted" style="text-align:right">${dt(s.created_at)} · ${esc(PAY[s.payment_method])}</span></div>
@@ -1594,9 +1850,12 @@ async function viewHistory() {
       ${s.offline ? `<div class="muted"><span class="tag warn">Hors ligne</span> réf. ${esc(s.offline_ref)}${s.client_created_at ? ' · faite à ' + dt(s.client_created_at) : ' · heure du téléphone inconnue'}</div>` : ''}
       <ul>${(s.sale_items || []).map(i => `<li>${qty(i.quantity)} ${esc(UNITS[i.products?.unit] || '')} ${esc(i.products?.name)} · ${money(i.line_total)}</li>`).join('')}</ul>
       <div>${s.status === 'cancelled' ? `<span class="tag bad">Annulée</span> <span class="muted">${esc(s.cancel_reason)}</span>` : ''}
-        ${s.status !== 'cancelled' && s.paid < s.total ? `<span class="tag warn">Crédit : reste ${money(s.total - s.paid)}</span> <span class="muted">${esc(s.customer_name)}</span>` : ''}</div>
+        ${s.advance_used > 0 ? `<span class="tag">Sur l'avance : ${money(s.advance_used)}</span> ` : ''}
+        ${s.status !== 'cancelled' && s.paid + (s.advance_used || 0) < s.total ? `<span class="tag warn">Crédit : reste ${money(s.total - s.paid - (s.advance_used || 0))}</span>` : ''}
+        ${s.customer_name && (s.paid < s.total) ? ` <span class="muted">${esc(s.customer_name)}</span>` : ''}</div>
       ${s.status !== 'cancelled' ? `<div class="seg"><button class="btn ghost small" data-inv="${esc(s.id)}">Facture</button>${isManager() ? `<button class="btn ghost small" data-cancel="${esc(s.id)}" ${canWrite() ? '' : 'disabled'}>Annuler cette vente</button>` : ''}</div>` : ''}
     </article>`).join('') || '<p class="empty">Aucune vente pour le moment.</p>'}</section>`;
+  bindHistSeg();
   const sn = $('#sync-now'); if (sn) sn.onclick = async () => { await syncQueue(true); S.sales = null; viewHistory(); };
   document.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => cancelDialog(b.dataset.cancel));
   document.querySelectorAll('[data-inv]').forEach(b => b.onclick = () => openInvoice(S.sales.find(x => x.id === b.dataset.inv)));
@@ -1642,7 +1901,9 @@ async function viewReport() {
         ${M('Nombre de ventes', d.sales_count, 1)}${M('Marge brute', d.gross_margin)}
         ${M('Dépenses', d.operating_expenses)}${M('Résultat estimé', d.net_estimate)}
         ${d.discounts != null ? M('Remises accordées', d.discounts) : ''}
-        ${d.repayments != null ? M('Remboursements reçus', d.repayments) : ''}${d.credit_outstanding != null ? M('Crédits en cours (total)', d.credit_outstanding) : ''}
+        ${d.repayments != null ? M('Dépôts des clients', d.repayments) : ''}${d.credit_outstanding != null ? M('Crédits en cours (total)', d.credit_outstanding) : ''}
+        ${d.advances_held != null ? M('Avances gardées (argent des clients)', d.advances_held) : ''}${d.advance_refunds ? M('Avances rendues', d.advance_refunds) : ''}
+        ${d.open_quotes != null ? M('Devis en cours', d.open_quotes, 1) : ''}
       </div>
       ${d.low_stock_count > 0 ? `<div class="banner">${d.low_stock_count} produit(s) en stock bas.</div>` : ''}
       <p class="muted" style="font-size:13px">Le résultat est une estimation : marge brute moins dépenses et transport des achats. Les dates suivent l'heure du Burkina Faso (UTC).</p>
@@ -1897,7 +2158,7 @@ function invoicePdf(inv) {
       let y = 80;
       if (inv.shop.address) { pdf.text(L, y, inv.shop.address, { size: 10, color: GREY }); y += 14; }
       if (inv.shop.phone) { pdf.text(L, y, 'Tél. : ' + inv.shop.phone, { size: 10, color: GREY }); y += 14; }
-      pdf.text(R, 62, 'FACTURE', { size: 20, bold: true, align: 'right' });
+      pdf.text(R, 62, inv.kind === 'quote' ? 'DEVIS' : 'FACTURE', { size: 20, bold: true, align: 'right' });
       pdf.text(R, 80, 'N° ' + inv.num, { size: 11, bold: true, align: 'right' });
       pdf.text(R, 94, dtFull(inv.date), { size: 10, align: 'right', color: GREY });
       if (inv.ref2) pdf.text(R, 108, 'Réf. hors ligne : ' + inv.ref2, { size: 9, align: 'right', color: GREY });
@@ -1906,10 +2167,11 @@ function invoicePdf(inv) {
       let iy = ly + 22;
       if (inv.seller) { pdf.text(L, iy, 'Vendeur : ' + inv.seller, { size: 10 }); iy += 15; }
       if (inv.customer) { pdf.text(L, iy, 'Client : ' + inv.customer, { size: 10, bold: true }); iy += 15; }
-      pdf.text(L, iy, 'Paiement : ' + inv.pay, { size: 10 });
+      if (inv.kind === 'quote') pdf.text(L, iy, 'Valable jusqu\'au ' + dDay(inv.valid) + ' (prix garantis jusqu\'à cette date)', { size: 10, bold: true });
+      else pdf.text(L, iy, 'Paiement : ' + inv.pay, { size: 10 });
       top = iy + 26;
     } else {
-      pdf.text(L, 50, inv.shop.name + ' : facture ' + inv.num + ' (suite)', { size: 10, bold: true, color: GREY });
+      pdf.text(L, 50, inv.shop.name + (inv.kind === 'quote' ? ' : devis ' : ' : facture ') + inv.num + ' (suite)', { size: 10, bold: true, color: GREY });
       top = 80;
     }
     pdf.rect(L, top, R - L, 22, [0.92, 0.95, 0.93]);
@@ -1933,7 +2195,7 @@ function invoicePdf(inv) {
   }
   if (top > 660) { header(false); }
   top += 24;
-  const credit = inv.paid < inv.total;
+  const credit = inv.paid + (inv.advance || 0) < inv.total;
   if (inv.discount > 0) {
     pdf.text(X_QTY - 20, top, 'Sous-total', { size: 10.5 });
     pdf.text(X_AMT, top, plainMoney(inv.total + inv.discount) + ' FCFA', { size: 10.5, align: 'right' });
@@ -1945,22 +2207,34 @@ function invoicePdf(inv) {
   pdf.text(X_QTY - 20, top, 'TOTAL', { size: 13, bold: true });
   pdf.text(X_AMT, top, plainMoney(inv.total) + ' FCFA', { size: 13, bold: true, align: 'right' });
   top += 20;
-  pdf.text(X_QTY - 20, top, 'Payé', { size: 10.5 });
-  pdf.text(X_AMT, top, plainMoney(inv.paid) + ' FCFA', { size: 10.5, align: 'right' });
-  if (credit) {
-    top += 18;
-    pdf.text(X_QTY - 20, top, 'Reste à payer', { size: 11, bold: true, color: RED });
-    pdf.text(X_AMT, top, plainMoney(inv.total - inv.paid) + ' FCFA', { size: 11, bold: true, align: 'right', color: RED });
+  if (inv.kind === 'quote') {
+    pdf.text(L, top + 10, 'Ce devis n\'est pas une facture. Le stock n\'est pas réservé.', { size: 9.5, color: GREY });
+  } else {
+    pdf.text(X_QTY - 20, top, 'Payé', { size: 10.5 });
+    pdf.text(X_AMT, top, plainMoney(inv.paid) + ' FCFA', { size: 10.5, align: 'right' });
+    if (inv.advance > 0) {
+      top += 17;
+      pdf.text(X_QTY - 20, top, 'Pris sur l\'avance', { size: 10.5 });
+      pdf.text(X_AMT, top, plainMoney(inv.advance) + ' FCFA', { size: 10.5, align: 'right' });
+    }
+    if (credit) {
+      top += 18;
+      pdf.text(X_QTY - 20, top, 'Reste à payer', { size: 11, bold: true, color: RED });
+      pdf.text(X_AMT, top, plainMoney(inv.total - inv.paid - (inv.advance || 0)) + ' FCFA', { size: 11, bold: true, align: 'right', color: RED });
+    }
   }
   if (inv.shop.footer) pdf.text(pdf.W / 2, 790, inv.shop.footer, { size: 10, align: 'center', color: GREY });
   pdf.text(pdf.W / 2, 815, 'Établi avec Bara Gestion', { size: 7.5, align: 'center', color: [0.6, 0.64, 0.61] });
-  return pdf.build('Facture ' + inv.num);
+  return pdf.build((inv.kind === 'quote' ? 'Devis ' : 'Facture ') + inv.num);
 }
 
 function invoiceText(inv) {
   const rows = inv.lines.map(l => `- ${plainQty(l.qty)}${l.unit ? ' ' + l.unit : ''} ${l.name} : ${plainMoney(l.total)} FCFA`);
-  return [`${inv.shop.name}`, `Facture ${inv.num} du ${dtFull(inv.date)}`, ...(inv.ref2 ? [`Réf. hors ligne : ${inv.ref2}`] : []), ...rows, ...(inv.discount > 0 ? [`Remise : -${plainMoney(inv.discount)} FCFA`] : []), `Total : ${plainMoney(inv.total)} FCFA`,
-    ...(inv.paid < inv.total ? [`Reste à payer : ${plainMoney(inv.total - inv.paid)} FCFA`] : []),
+  const q = inv.kind === 'quote', rest = inv.total - inv.paid - (inv.advance || 0);
+  return [`${inv.shop.name}`, `${q ? 'Devis' : 'Facture'} ${inv.num} du ${dtFull(inv.date)}`, ...(inv.ref2 ? [`Réf. hors ligne : ${inv.ref2}`] : []), ...rows, ...(inv.discount > 0 ? [`Remise : -${plainMoney(inv.discount)} FCFA`] : []), `Total : ${plainMoney(inv.total)} FCFA`,
+    ...(q ? [`Valable jusqu'au ${dDay(inv.valid)}`] : []),
+    ...(!q && inv.advance > 0 ? [`Pris sur l'avance : ${plainMoney(inv.advance)} FCFA`] : []),
+    ...(!q && rest > 0 ? [`Reste à payer : ${plainMoney(rest)} FCFA`] : []),
     ...(inv.shop.footer ? ['', inv.shop.footer] : [])].join('\n');
 }
 /* ===== PDF:end ===== */
@@ -2170,32 +2444,33 @@ async function buildInvoice(s) {
     date: s.client_created_at || s.created_at, seller, customer: s.customer_name || '', pay: PAY[s.payment_method] || '',
     lines: (s.sale_items || []).map(i => ({ name: i.products?.name || 'Produit', unit: UNITS[i.products?.unit] || '',
       qty: i.quantity, price: i.unit_price, total: i.line_total })),
-    total: s.total, paid: s.paid, discount: s.discount || 0
+    total: s.total, paid: s.paid, discount: s.discount || 0, advance: s.advance_used || 0
   };
 }
 
 function downloadInvoice(inv) {
   const url = URL.createObjectURL(new Blob([invoicePdf(inv)], { type: 'application/pdf' }));
   const a = document.createElement('a');
-  a.href = url; a.download = `Facture-${inv.num}.pdf`;
+  a.href = url; a.download = `${inv.kind === 'quote' ? 'Devis' : 'Facture'}-${inv.num}.pdf`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 15000);
 }
 
-async function shareInvoice(inv) {
-  const name = `Facture-${inv.num}.pdf`;
+async function shareInvoice(inv, phone) {
+  const word = inv.kind === 'quote' ? 'Devis' : 'Facture';
+  const name = `${word}-${inv.num}.pdf`;
   const text = invoiceText(inv);
   try {
     const file = new File([invoicePdf(inv)], name, { type: 'application/pdf' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: `Facture ${inv.num}`, text: `${inv.shop.name} : facture ${inv.num}` });
+      await navigator.share({ files: [file], title: `${word} ${inv.num}`, text: `${inv.shop.name} : ${word.toLowerCase()} ${inv.num}` });
       return;
     }
   } catch (e) {
     if (e && e.name === 'AbortError') return;            // l'utilisateur a fermé le menu de partage
   }
   // Ordinateur ou navigateur sans partage de fichier : message WhatsApp avec le détail.
-  window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
+  window.open('https://wa.me/' + (phone ? waNumber(phone) : '') + '?text=' + encodeURIComponent(text), '_blank', 'noopener');
   toast('Message WhatsApp préparé. Pour envoyer le PDF, utilisez « Télécharger ».');
 }
 
@@ -2215,7 +2490,8 @@ async function openInvoice(saleOrId) {
       <ul style="margin:6px 0 0;padding-left:18px">${inv.lines.map(l => `<li>${esc(plainQty(l.qty))} ${esc(l.unit)} ${esc(l.name)} · ${esc(money(l.total))}</li>`).join('')}</ul>
       ${inv.discount > 0 ? `<div class="muted">Remise : − ${esc(money(inv.discount))}</div>` : ''}
       <div class="total" style="margin-top:6px"><span>Total</span><span class="num">${esc(money(inv.total))}</span></div>
-      ${inv.paid < inv.total ? `<div style="color:var(--bad);font-weight:600">Reste à payer : ${esc(money(inv.total - inv.paid))}</div>` : ''}
+      ${inv.advance > 0 ? `<div class="muted">Pris sur l'avance : ${esc(money(inv.advance))}</div>` : ''}
+      ${inv.paid + inv.advance < inv.total ? `<div style="color:var(--bad);font-weight:600">Reste à payer : ${esc(money(inv.total - inv.paid - inv.advance))}</div>` : ''}
     </div>
     ${incomplete && S.role === 'owner' ? `<div class="banner">Ajoutez l'adresse et le téléphone de la boutique (onglet Équipe, « Fiche de la boutique ») pour qu'ils apparaissent sur la facture.</div>` : ''}
     <div class="row"><button class="btn" id="inv-share">Envoyer par WhatsApp</button><button class="btn ghost" id="inv-dl">Télécharger le PDF</button></div>
