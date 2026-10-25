@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Bara Gestion version 2026-10-25b : remises négociées -->
+<!-- Bara Gestion version 2026-10-25c : étiquettes code-barres -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -156,7 +156,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-25b';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-25c';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -863,18 +863,20 @@ function viewProducts() {
   $('#view').innerHTML = `
     <section class="card stack">
       <div class="row"><h2 style="flex:1 1 auto">Produits (${S.products.length})</h2>
-        ${isManager() ? `<button class="btn small" id="newp" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau produit</button>` : ''}</div>
+        ${isManager() ? `<button class="btn ghost small" id="labels" style="flex:0 0 auto">Étiquettes</button><button class="btn small" id="newp" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau produit</button>` : ''}</div>
       <div class="plist">${S.products.map(p => {
         const low = Number(p.stock_qty) <= Number(p.alert_threshold);
         return `<div class="prod">
           <div style="min-width:0"><div class="nm">${esc(p.name)}</div>
             <div class="sub">${esc(p.category)} · ${qty(p.stock_qty)} ${esc(UNITS[p.unit])} ${low ? '<span class="tag warn">Stock bas</span>' : ''}</div>
+            ${isManager() && p.barcode ? `<div class="sub">Code ${esc(p.barcode)}</div>` : ''}
             ${isManager() && S.costs[p.id] != null ? `<div class="sub">Achat ${money(S.costs[p.id])}${Number(p.sell_price) < Number(S.costs[p.id]) ? ' <span class="tag bad">Vente à perte</span>' : Number(p.sell_price) === 0 ? ' <span class="tag bad">Prix de vente à 0</span>' : ''}</div>` : ''}
             ${isManager() ? `<div class="seg" style="margin-top:6px"><button class="btn ghost small" data-edit="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Modifier</button><button class="btn ghost small" data-recv="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Réception</button><button class="btn ghost small" data-adj="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Ajuster</button></div>` : ''}</div>
           <div class="pr num">${money(p.sell_price)}</div></div>`;
       }).join('') || '<p class="empty">Aucun produit.</p>'}</div>
     </section>`;
   const n = $('#newp'); if (n) n.onclick = () => openSheet('new');
+  const lb = $('#labels'); if (lb) lb.onclick = openLabels;
   document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openSheet('edit', b.dataset.edit));
   document.querySelectorAll('[data-recv]').forEach(b => b.onclick = () => openSheet('recv', b.dataset.recv));
   document.querySelectorAll('[data-adj]').forEach(b => b.onclick = () => openSheet('adj', b.dataset.adj));
@@ -892,7 +894,7 @@ function openSheet(kind, pid) {
         <label>Prix de vente (FCFA)<input id="f-sell" type="number" inputmode="numeric" min="0" step="1" required></label></div>
       <div class="row"><label>Quantité en stock<input id="f-qty" type="number" inputmode="decimal" min="0" step="any" value="0"></label>
         <label>Alerte stock bas<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="0"></label></div>
-      <label>Code-barres (facultatif)<input id="f-code" maxlength="32" autocomplete="off"></label>`;
+      <label>Code-barres du fabricant (facultatif : sinon un code est créé automatiquement)<input id="f-code" maxlength="32" autocomplete="off"></label>`;
   } else if (kind === 'edit') {
     title = 'Modifier : ' + p.name;
     body = `<label>Nom<input id="f-name" maxlength="120" required value="${esc(p.name)}"></label>
@@ -1369,6 +1371,101 @@ function invoiceText(inv) {
     ...(inv.shop.footer ? ['', inv.shop.footer] : [])].join('\n');
 }
 /* ===== PDF:end ===== */
+
+/* ===== Étiquettes code-barres (Code 128) =====
+   Dessinées directement dans le PDF (aucun outil extérieur). Code 128 est lu par tous les
+   téléphones et toutes les douchettes de caisse. Codes uniquement chiffres et de longueur paire :
+   jeu C (plus court) ; sinon jeu B (lettres et chiffres). */
+const C128 = ['212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
+  '221312','231212','112232','122132','122231','113222','123122','123221','223211','221132','221231','213212',
+  '223112','312131','311222','321122','321221','312212','322112','322211','212123','212321','232121','111323',
+  '131123','131321','112313','132113','132311','211313','231113','231311','112133','112331','132131','113123',
+  '113321','133121','313121','211331','231131','213113','213311','213131','311123','311321','331121','312113',
+  '312311','332111','314111','221411','431111','111224','111422','121124','121421','141122','141221','112214',
+  '112412','122114','122411','142112','142211','241211','221114','413111','241112','134111','111242','121142',
+  '121241','114212','124112','124211','411212','421112','421211','212141','214121','412121','111143','111341',
+  '131141','114113','114311','411113','411311','113141','114131','311141','411131','211412','211214','211232',
+  '2331112'];
+
+// Renvoie la suite des largeurs (barre, espace, barre…) en modules, ou null si le code n'est pas encodable.
+function code128(text) {
+  const s = String(text || '');
+  if (!s.length || s.length > 40) return null;
+  let vals;
+  if (/^\d+$/.test(s) && s.length % 2 === 0) {
+    vals = [105];
+    for (let i = 0; i < s.length; i += 2) vals.push(Number(s.slice(i, i + 2)));
+  } else {
+    if (!/^[\x20-\x7e]+$/.test(s)) return null;
+    vals = [104, ...[...s].map(c => c.charCodeAt(0) - 32)];
+  }
+  let sum = vals[0];
+  for (let i = 1; i < vals.length; i++) sum += i * vals[i];
+  vals.push(sum % 103, 106);
+  return vals.map(v => C128[v]).join('').split('').map(Number);
+}
+
+// Planche A4 : 3 colonnes x 8 lignes. items = [{ name, code, price, copies }]
+function labelsPdf(items, showPrice) {
+  const pdf = newPdf(), COLS = 3, ROWS = 8, MX = 18, MY = 24;
+  const CW = (pdf.W - 2 * MX) / COLS, RH = (pdf.H - 2 * MY) / ROWS;
+  const list = [];
+  items.forEach(it => { for (let i = 0; i < Math.max(1, Math.min(200, it.copies || 1)); i++) list.push(it); });
+  list.forEach((it, n) => {
+    const k = n % (COLS * ROWS);
+    if (k === 0) pdf.page();
+    const x = MX + (k % COLS) * CW, y = MY + Math.floor(k / COLS) * RH;
+    // Repères de découpe discrets
+    pdf.line(x + 4, x + CW - 4, y + RH - 1, [0.88, 0.9, 0.88], 0.4);
+    const name = pdfWrap(it.name, true, 9, CW - 16)[0] || '';
+    pdf.text(x + CW / 2, y + 15, name, { size: 9, bold: true, align: 'center' });
+    const mods = code128(it.code);
+    if (mods) {
+      const total = mods.reduce((a, b) => a + b, 0) + 20;          // + zones blanches de 10 modules
+      const mw = Math.min(1.25, (CW - 12) / total);
+      const bw = (total - 20) * mw;
+      let bx = x + (CW - bw) / 2;
+      mods.forEach((m, i) => { if (i % 2 === 0) pdf.rect(bx, y + 22, m * mw, 40, [0, 0, 0]); bx += m * mw; });
+    }
+    pdf.text(x + CW / 2, y + 74, it.code, { size: 8, align: 'center', color: [0.25, 0.28, 0.26] });
+    if (showPrice) pdf.text(x + CW / 2, y + 88, plainMoney(it.price) + ' FCFA', { size: 9.5, bold: true, align: 'center' });
+  });
+  return pdf.build('Étiquettes ' + S.shop.name);
+}
+
+function openLabels() {
+  const prods = S.products.filter(p => p.barcode);
+  const missing = S.products.length - prods.length;
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Étiquettes">
+    <h2>Imprimer des étiquettes</h2>
+    <p class="muted" style="margin:0;font-size:13px">Choisissez le nombre d'étiquettes par produit (0 = aucune). Planche A4 de 24 étiquettes, à imprimer puis découper. Collez-les sur l'article, son emballage ou l'étagère (produits en vrac).</p>
+    ${missing ? `<div class="banner">${missing} produit(s) n'ont pas encore de code : ils en recevront un après la mise à jour de la base.</div>` : ''}
+    <div class="row"><button class="btn ghost small" type="button" id="lb-all">1 pour tous</button><button class="btn ghost small" type="button" id="lb-none">Aucun</button></div>
+    <div class="plist" style="max-height:45vh;overflow:auto">${prods.map(p => `<div class="row" style="align-items:center;flex-wrap:nowrap">
+      <div style="flex:1 1 auto;min-width:0"><div class="nm" style="overflow-wrap:anywhere">${esc(p.name)}</div><div class="sub muted">${esc(p.barcode)}</div></div>
+      <input type="number" min="0" max="200" step="1" value="0" data-lb="${esc(p.id)}" style="width:70px;flex:0 0 auto" aria-label="Étiquettes pour ${esc(p.name)}"></div>`).join('') || '<p class="empty">Aucun produit avec code.</p>'}</div>
+    <div style="display:flex;align-items:center;gap:10px"><input id="lb-price" type="checkbox" style="width:22px;height:22px;flex:0 0 auto;margin:0"><span style="font-size:14px" onclick="document.getElementById('lb-price').click()">Afficher le prix (à réimprimer si le prix change)</span></div>
+    <div class="row"><button class="btn" type="submit">Créer le PDF</button><button class="btn ghost" type="button" id="cancel">Fermer</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#lb-all').onclick = () => document.querySelectorAll('[data-lb]').forEach(i => { i.value = 1; });
+  $('#lb-none').onclick = () => document.querySelectorAll('[data-lb]').forEach(i => { i.value = 0; });
+  $('#sheet').onsubmit = ev => {
+    ev.preventDefault();
+    const items = [];
+    document.querySelectorAll('[data-lb]').forEach(i => {
+      const n = Math.round(Number(i.value) || 0), p = prods.find(x => x.id === i.dataset.lb);
+      if (n > 0 && p) items.push({ name: p.name, code: p.barcode, price: p.sell_price, copies: n });
+    });
+    if (!items.length) return toast('Choisissez au moins une étiquette.', true);
+    const url = URL.createObjectURL(new Blob([labelsPdf(items, $('#lb-price').checked)], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'Etiquettes-' + new Date().toISOString().slice(0, 10) + '.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    toast('Étiquettes créées : ouvrez le PDF pour l\'imprimer.');
+  };
+}
 
 /* ===== Facture : écran, partage, téléchargement ===== */
 async function ensureNames() {
