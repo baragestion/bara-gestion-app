@@ -160,7 +160,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-25h';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26a';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -787,6 +787,11 @@ function addToCart(id) {
   drawCart();
 }
 
+function advText(t, adv) {
+  return t > adv ? `Pris sur l'avance : <b>${money(adv)}</b>. À encaisser : <b>${money(t - adv)}</b>.`
+                 : `Tout est pris sur l'avance : <b>rien à encaisser</b>. Il restera ${money(adv - t)} d'avance.`;
+}
+
 // Remise : texte d'aide et contrôle (le vrai contrôle est fait par la base).
 function discInfo(sub) {
   const d = S.disc || 0, pct = sub ? Math.round(d * 10000 / sub) / 100 : 0;
@@ -811,6 +816,9 @@ function drawCart() {
   const total = sub - S.disc;
   const canDisc = S.role === 'owner' || (S.shop.discMax || 0) > 0;
   const adv = S.offline ? 0 : advOf(S.custSel);
+  // Client avec une avance : par défaut, la vente est prise sur son avance (rien à encaisser).
+  const useAdv = adv > 0 && !S.custSel.noAdv && !S.editQuote;
+  const advPart = t => useAdv ? Math.min(adv, t) : 0;
   const lines = [...S.cart].map(([id, q]) => {
     const p = S.products.find(x => x.id === id);
     return `<div class="cartline">
@@ -825,15 +833,17 @@ function drawCart() {
       <div class="muted" id="disc-info" style="font-size:13px;padding-bottom:12px">${discInfo(sub)}</div></div>` : ''}
     <div class="total"><span>Total</span><span class="num" id="total">${money(total)}</span></div>
     ${S.editQuote ? '' : `<div class="row">
-      <label>Montant encaissé (FCFA)<input id="paid" type="number" inputmode="numeric" min="0" step="1" value="${total}"></label>
+      <label>Montant encaissé (FCFA)<input id="paid" type="number" inputmode="numeric" min="0" step="1" value="${total - advPart(total)}"></label>
       <label>Paiement<select id="pay">${Object.entries(PAY).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
     </div>`}
     <div class="row" style="align-items:center;flex-wrap:nowrap"><div style="flex:1 1 auto;min-width:0">
       <div class="muted" style="font-size:13px">${S.editQuote ? 'Client du devis' : 'Client (obligatoire pour un crédit ou une avance)'}</div>
       <div id="cust-sel" style="font-weight:600">${S.custSel ? esc(S.custSel.name) + ' <span class="muted" style="font-weight:400">' + esc(S.custSel.phone || '') + '</span>' : '<span class="muted" style="font-weight:400">aucun</span>'}</div></div>
       <button class="btn ghost small" type="button" id="cust-pick" style="flex:0 0 auto">${S.custSel ? 'Changer' : 'Choisir'}</button></div>
-    ${adv && !S.editQuote ? `<div class="banner ok" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Avance de ${esc(S.custSel.name)} : <b>${money(adv)}</b>
-      <button class="btn small" type="button" id="use-adv">Payer avec l'avance</button></div>` : ''}
+    ${adv && !S.editQuote ? `<div class="banner ${useAdv ? 'ok' : ''}" id="adv-box" style="display:grid;gap:6px">
+      <div>Avance de ${esc(S.custSel.name)} : <b>${money(adv)}</b></div>
+      <div id="adv-info">${useAdv ? advText(total, adv) : 'L\'avance n\'est pas utilisée : le client paie cette vente.'}</div>
+      <button class="btn small ghost" type="button" id="use-adv">${useAdv ? 'Le client paie en argent (garder l\'avance)' : 'Prendre sur l\'avance'}</button></div>` : ''}
     ${S.editQuote ? `<div class="row"><button class="btn" id="q-save" ${canWrite() ? '' : 'disabled'}>Enregistrer le devis ${esc(quoteNo(S.editQuote.no))}</button>
       <button class="btn ghost" id="q-drop">Abandonner</button></div>`
     : `<div class="row"><button class="btn" id="validate" ${canWrite() || canSellOffline() ? '' : 'disabled'}>${S.offline ? 'Valider (hors ligne)' : 'Valider la vente'}</button>
@@ -852,11 +862,11 @@ function drawCart() {
     const v = Math.round(Number(di.value) || 0);
     S.disc = v > 0 ? v : 0;
     const t = sub - Math.min(S.disc, sub);
-    $('#total').textContent = money(t); if ($('#paid')) $('#paid').value = t; $('#disc-info').innerHTML = discInfo(sub);
+    $('#total').textContent = money(t); if ($('#paid')) $('#paid').value = t - advPart(t); $('#disc-info').innerHTML = discInfo(sub);
+    if (useAdv && $('#adv-info')) $('#adv-info').innerHTML = advText(t, adv);
   };
   const ua = $('#use-adv');
-  if (ua) ua.onclick = () => { const t = sub - Math.min(S.disc || 0, sub); $('#paid').value = Math.max(0, t - adv);
-    toast(t > adv ? `L'avance paie ${money(adv)}. Reste à encaisser : ${money(t - adv)}.` : `Tout est payé avec l'avance. Il restera ${money(adv - t)} d'avance.`); };
+  if (ua) ua.onclick = () => { S.custSel.noAdv = useAdv; drawCart(); };
   const v = $('#validate'); if (v) v.onclick = submitSale;
   const mq = $('#mk-quote'); if (mq) mq.onclick = () => saveQuote(null);
   const qs = $('#q-save'); if (qs) qs.onclick = () => saveQuote(S.editQuote.id);
