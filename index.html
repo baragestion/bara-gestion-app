@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Bara Gestion version 2026-10-25c : étiquettes code-barres -->
+<!-- Bara Gestion version 2026-10-25d : scan par la caméra -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -156,7 +156,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-25c';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-25d';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -699,7 +699,7 @@ function draw() {
     <div id="sheet-host"></div>`;
   $('#logout').onclick = askLeave;
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
-  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; draw(); });
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { stopScan(); S.tab = b.dataset.tab; draw(); });
   ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam })[S.tab]();
 }
 
@@ -716,11 +716,14 @@ function viewSale() {
       <button class="btn small" id="last-inv" style="flex:0 0 auto">Facture</button><button class="btn ghost small" id="last-x" style="flex:0 0 auto">OK</button></div></section>` : ''}
     <section class="card stack">
       <h2>Nouvelle vente</h2>
-      <label>Chercher un produit ou scanner un code<input id="q" type="search" placeholder="Nom, ou code-barres puis Entrée" value="${esc(S.q)}" autocomplete="off"></label>
+      <div class="row" style="align-items:flex-end;flex-wrap:nowrap">
+        <label style="flex:1 1 auto">Chercher un produit ou scanner un code<input id="q" type="search" placeholder="Nom, ou code-barres puis Entrée" value="${esc(S.q)}" autocomplete="off"></label>
+        ${canScan() ? '<button class="btn small" type="button" id="scan" style="flex:0 0 auto;margin-bottom:2px" aria-label="Scanner avec la caméra">📷 Scanner</button>' : ''}</div>
       <div class="plist" id="plist"></div>
     </section>
     <section class="card stack" id="cart"></section>`;
   const q = $('#q');
+  const sc = $('#scan'); if (sc) sc.onclick = scanToCart;
   q.oninput = () => { S.q = q.value; drawProducts(); };
   q.onkeydown = ev => {
     if (ev.key !== 'Enter') return;
@@ -894,7 +897,9 @@ function openSheet(kind, pid) {
         <label>Prix de vente (FCFA)<input id="f-sell" type="number" inputmode="numeric" min="0" step="1" required></label></div>
       <div class="row"><label>Quantité en stock<input id="f-qty" type="number" inputmode="decimal" min="0" step="any" value="0"></label>
         <label>Alerte stock bas<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="0"></label></div>
-      <label>Code-barres du fabricant (facultatif : sinon un code est créé automatiquement)<input id="f-code" maxlength="32" autocomplete="off"></label>`;
+      <div class="row" style="align-items:flex-end;flex-wrap:nowrap">
+        <label style="flex:1 1 auto">Code-barres du fabricant (facultatif : sinon un code est créé automatiquement)<input id="f-code" maxlength="32" autocomplete="off"></label>
+        ${canScan() ? '<button class="btn ghost small" type="button" id="f-scan" style="flex:0 0 auto;margin-bottom:2px">📷</button>' : ''}</div>`;
   } else if (kind === 'edit') {
     title = 'Modifier : ' + p.name;
     body = `<label>Nom<input id="f-name" maxlength="120" required value="${esc(p.name)}"></label>
@@ -902,7 +907,9 @@ function openSheet(kind, pid) {
       <div class="row"><label>Prix d'achat (FCFA)<input id="f-buy" type="number" inputmode="numeric" min="0" step="1" required value="${esc(S.costs[p.id] ?? '')}"></label>
         <label>Prix de vente (FCFA)<input id="f-sell" type="number" inputmode="numeric" min="0" step="1" required value="${esc(p.sell_price)}"></label></div>
       <label>Alerte stock bas<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="${esc(p.alert_threshold)}"></label>
-      <label>Code-barres (facultatif)<input id="f-code" maxlength="32" autocomplete="off" value="${esc(p.barcode || '')}"></label>
+      <div class="row" style="align-items:flex-end;flex-wrap:nowrap">
+        <label style="flex:1 1 auto">Code-barres<input id="f-code" maxlength="32" autocomplete="off" value="${esc(p.barcode || '')}"></label>
+        ${canScan() ? '<button class="btn ghost small" type="button" id="f-scan" style="flex:0 0 auto;margin-bottom:2px">📷</button>' : ''}</div>
       <p class="muted" style="margin:0;font-size:13px">Le nouveau prix s'applique aux prochaines ventes. Les ventes déjà faites gardent leur prix. Chaque changement de prix est noté dans le journal. Pour changer la quantité, utilisez « Réception » ou « Ajuster ».</p>
       <div style="display:flex;align-items:center;gap:10px"><input id="f-off" type="checkbox" style="width:22px;height:22px;flex:0 0 auto;margin:0"><span style="font-size:14px" onclick="document.getElementById('f-off').click()">Retirer ce produit de la vente (il reste dans l'historique)</span></div>`;
   } else if (kind === 'recv') {
@@ -973,9 +980,15 @@ function openSheet(kind, pid) {
     closeSheet(); toast('Enregistré.');
     await loadProducts(); S.summary = null; draw();
   };
+  const fs = $('#f-scan');
+  if (fs) fs.onclick = () => openScanner('Scanner le code du fabricant', code => {
+    const other = findByCode(code);
+    if (other && other.id !== pid) { toast('Ce code est déjà utilisé par : ' + other.name, true); return true; }
+    $('#f-code').value = code; toast('Code lu : ' + code); return false;
+  });
   const first = $('#sheet input'); if (first) first.focus();
 }
-function closeSheet() { $('#sheet-host').innerHTML = ''; }
+function closeSheet() { $('#sheet-host').innerHTML = ''; stopScan(); }
 
 /* ===== Onglet Historique ===== */
 const SALE_COLS = 'id,invoice_no,discount,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
@@ -1371,6 +1384,93 @@ function invoiceText(inv) {
     ...(inv.shop.footer ? ['', inv.shop.footer] : [])].join('\n');
 }
 /* ===== PDF:end ===== */
+
+/* ===== Scan par la caméra =====
+   Utilise le lecteur de codes intégré au navigateur (Chrome sur Android) : rien n'est envoyé sur
+   internet, les images restent dans le téléphone, et le scan marche aussi hors ligne.
+   La caméra est coupée dès la fermeture du scanner. */
+const SCAN_FORMATS = ['code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_39', 'itf', 'qr_code'];
+const canScan = () => 'BarcodeDetector' in window && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+let SCAN = null;
+
+function stopScan() {
+  if (!SCAN) return;
+  SCAN.stopped = true;
+  clearTimeout(SCAN.timer);
+  try { SCAN.stream && SCAN.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  const h = document.getElementById('scan-host'); if (h) h.remove();
+  SCAN = null;
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stopScan(); });
+
+// onCode(code) renvoie true pour continuer à scanner (mode caisse), false pour fermer.
+async function openScanner(title, onCode) {
+  if (!canScan()) {
+    return toast('Le scan par la caméra n\'est pas disponible sur ce navigateur. Utilisez Chrome sur Android, ou tapez le code.', true);
+  }
+  stopScan();
+  const host = document.createElement('div');
+  host.id = 'scan-host';
+  host.innerHTML = `<div class="sheet-bg" style="z-index:60"><div class="sheet" role="dialog" aria-label="${esc(title)}">
+    <h2>${esc(title)}</h2>
+    <div style="position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3">
+      <video id="scan-v" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover"></video>
+      <div style="position:absolute;left:8%;right:8%;top:38%;height:24%;border:2px solid #6fcf97;border-radius:8px;box-shadow:0 0 0 999px rgba(0,0,0,.25)"></div>
+    </div>
+    <p class="muted" id="scan-msg" style="margin:0;text-align:center">Placez le code-barres dans le cadre.</p>
+    <button class="btn ghost" type="button" id="scan-x">Terminer</button></div></div>`;
+  document.body.appendChild(host);
+  $('#scan-x').onclick = stopScan;
+  const me = SCAN = { stopped: false, last: '', lastAt: 0 };
+  try {
+    const supported = await BarcodeDetector.getSupportedFormats();
+    const formats = SCAN_FORMATS.filter(f => supported.includes(f));
+    if (!formats.length) throw new Error('formats');
+    me.det = new BarcodeDetector({ formats });
+    me.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    if (me.stopped) { me.stream.getTracks().forEach(t => t.stop()); return; }
+    const v = $('#scan-v'); v.srcObject = me.stream; await v.play().catch(() => {});
+  } catch (e) {
+    stopScan();
+    return toast(e && e.name === 'NotAllowedError'
+      ? 'Accès à la caméra refusé. Autorisez la caméra pour ce site dans les réglages du navigateur.'
+      : 'Caméra indisponible sur ce téléphone. Tapez le code à la main.', true);
+  }
+  const tick = async () => {
+    if (me.stopped) return;
+    const v = document.getElementById('scan-v');
+    try {
+      if (v && v.readyState >= 2) {
+        const found = await me.det.detect(v);
+        const code = found && found[0] && String(found[0].rawValue || '').trim();
+        // Le même code lu plusieurs fois de suite n'est compté qu'une fois (1,5 s d'écart minimum).
+        if (code && !(code === me.last && Date.now() - me.lastAt < 1500)) {
+          me.last = code; me.lastAt = Date.now();
+          try { navigator.vibrate && navigator.vibrate(60); } catch (e) {}
+          const more = onCode(code);
+          if (!more) return stopScan();
+        }
+      }
+    } catch (e) {}
+    if (!me.stopped) me.timer = setTimeout(tick, 200);
+  };
+  tick();
+}
+
+const findByCode = code => S.products.find(p => p.barcode && p.barcode.toUpperCase() === String(code).toUpperCase());
+
+// Caisse : chaque produit scanné s'ajoute au panier, on peut enchaîner.
+function scanToCart() {
+  openScanner('Scanner les produits', code => {
+    const p = findByCode(code);
+    const m = $('#scan-msg');
+    if (!p) { if (m) m.textContent = 'Code inconnu : ' + code; toast('Aucun produit avec le code ' + code + '.', true); return true; }
+    const before = S.cart.get(p.id) || 0;
+    addToCart(p.id);
+    if ((S.cart.get(p.id) || 0) > before && m) m.textContent = `Ajouté : ${p.name} (${qty(S.cart.get(p.id))} dans le panier)`;
+    return true;
+  });
+}
 
 /* ===== Étiquettes code-barres (Code 128) =====
    Dessinées directement dans le PDF (aucun outil extérieur). Code 128 est lu par tous les
