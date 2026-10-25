@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Bara Gestion version 2026-10-25 : avertissement vente à perte -->
+<!-- Bara Gestion version 2026-10-25b : remises négociées -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -156,7 +156,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-25';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-25b';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -182,7 +182,7 @@ const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
   q: '', cart: new Map(), ref: uuid(), busy: false,
-  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, alertCount: 0, alerts: null, devices: null, offAllowed: null
+  sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, disc: 0, discMap: null, alertCount: 0, alerts: null, devices: null, offAllowed: null
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
 const canWrite = () => S.sub && ['trial','active','grace'].includes(S.sub.status);
@@ -199,7 +199,7 @@ function saveCache() {
       v: 1, savedAt: Date.now(), userId: S.user.id, role: S.role,
       shop: { id: S.shop.id, name: S.shop.name, type: S.shop.type, who: S.shop.who,
               phone: S.shop.phone, address: S.shop.address, footer: S.shop.footer,
-              offAllowed: !!S.shop.offAllowed, maxPending: S.shop.maxPending || 30 },
+              offAllowed: !!S.shop.offAllowed, maxPending: S.shop.maxPending || 30, discMax: S.shop.discMax || 0 },
       products: S.products.map(p => ({ id: p.id, name: p.name, category: p.category, unit: p.unit,
         sell_price: p.sell_price, stock_qty: p.stock_qty, alert_threshold: p.alert_threshold, barcode: p.barcode }))
     }));
@@ -283,7 +283,7 @@ function nextRef(dev) {
   return `H-${deviceCode(dev)}-${String(n).padStart(4, '0')}`;
 }
 
-function queueSale(total, paid, pay, customer) {
+function queueSale(total, paid, pay, customer, disc = 0) {
   const dev = deviceId();
   if (!dev) { toast('Ce téléphone ne permet pas de garder des ventes hors ligne (mémoire bloquée).', true); return drawCart(); }
   if (pendingMine() >= (S.shop.maxPending || 30)) {
@@ -307,7 +307,7 @@ function queueSale(total, paid, pay, customer) {
   let rec;
   try {
     rec = { client_ref: S.ref, offline_ref: nextRef(dev), device_id: dev, shop_id: S.shop.id, user_id: S.user.id,
-      seller: S.shop.who, created_at: new Date().toISOString(), items, total, paid, payment_method: pay, customer };
+      seller: S.shop.who, created_at: new Date().toISOString(), items, total, paid, discount: disc, payment_method: pay, customer };
     const q = readQueue();
     if (!q.some(r => r.client_ref === rec.client_ref)) q.push(rec);
     writeQueue(q);
@@ -321,7 +321,7 @@ function queueSale(total, paid, pay, customer) {
     const c = JSON.parse(storage.getItem(CACHE_KEY) || 'null');
     if (c && c.userId === S.user.id) { c.products = S.products.map(p => ({ ...p })); storage.setItem(CACHE_KEY, JSON.stringify(c)); }
   } catch (e) {}
-  S.cart.clear(); S.ref = uuid(); S.last = { rec, total };
+  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.last = { rec, total };
   toast('Vente gardée sur le téléphone : ' + money(total) + ' (réf. ' + rec.offline_ref + ')');
   draw();
   syncQueue();
@@ -330,7 +330,7 @@ function queueSale(total, paid, pay, customer) {
 // Vente de la file → même forme qu'une vente du serveur (pour le reçu).
 function recToSale(r) {
   return { invoice_no: null, offline_ref: r.offline_ref, created_at: r.created_at, client_created_at: r.created_at,
-    created_by: r.user_id, customer_name: r.customer, payment_method: r.payment_method, total: r.total, paid: r.paid,
+    created_by: r.user_id, customer_name: r.customer, payment_method: r.payment_method, total: r.total, paid: r.paid, discount: r.discount || 0,
     sale_items: r.items.map(i => ({ quantity: i.quantity, unit_price: i.unit_price,
       line_total: Math.round(i.quantity * i.unit_price), products: { name: i.name, unit: i.unit } })) };
 }
@@ -347,7 +347,7 @@ async function syncQueue(manual) {
     const { data, error } = await sb.rpc('sync_offline_sale', {
       p_shop: r.shop_id, p_device: r.device_id, p_offline_ref: r.offline_ref, p_client_ref: r.client_ref,
       p_created_at: r.created_at, p_items: r.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price })),
-      p_paid: r.paid, p_payment_method: r.payment_method, p_customer: r.customer });
+      p_paid: r.paid, p_payment_method: r.payment_method, p_customer: r.customer, ...(r.discount ? { p_discount: r.discount } : {}) });
     const q = readQueue();
     if (!error && data && data.sale_id) {
       try { writeQueue(q.filter(x => x.client_ref !== r.client_ref)); } catch (e) { stop = true; }
@@ -434,16 +434,37 @@ const ALERT_TEXT = {
   negative_stock: (a, who) => `Stock négatif : ${a.details.product} (${qty(a.details.stock)}) après la vente ${a.details.ref} de ${who}. Comptez le stock réel.`,
   device_new: (a, who) => `Nouveau téléphone ou données effacées pour ${who} (code ${a.details.code}). Normal s'il a changé de téléphone, à vérifier sinon.`,
   offline_not_allowed: (a, who) => `${who} a vendu hors ligne sans autorisation (réf. ${a.details.ref}). La vente a été gardée.`,
+  discount_over: (a, who) => `Remise au-dessus du maximum par ${who} (réf. ${a.details.ref}) : ${money(a.details.discount)} sur ${money(a.details.subtotal)}, maximum ${a.details.max_pct} %.`,
   clock: (a, who) => `Heure incorrecte sur le téléphone de ${who} pour la vente ${a.details.ref}.`
 };
 
+function openDiscMax(uid) {
+  const who = (S.names && S.names[uid]) || 'cet employé';
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Remise maximum">
+    <h2>Remise maximum : ${esc(who)}</h2>
+    <p class="muted" style="margin:0">Pourcentage maximum du total que ${esc(who)} peut accorder en remise sur une vente. 0 = aucune remise. Toutes les remises restent visibles dans l'historique et le bilan.</p>
+    <label>Maximum (%)<input id="f-pct" type="number" inputmode="decimal" min="0" max="100" step="0.5" required value="${esc(S.discMap[uid] || 0)}"></label>
+    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const v = Math.round(Number($('#f-pct').value) * 100) / 100;
+    const { error } = await sb.rpc('set_discount_max', { p_shop: S.shop.id, p_user: uid, p_pct: v });
+    if (error) return toast(cleanErr(error), true);
+    closeSheet(); toast('Remise maximum enregistrée (effective à la prochaine ouverture de l\'application par l\'employé).');
+    S.offAllowed = null; viewTeam();
+  };
+}
+
 async function loadOfflineAdmin() {
   const [m, d, a] = await Promise.all([
-    sb.from('shop_members').select('user_id, offline_allowed').eq('shop_id', S.shop.id),
+    sb.from('shop_members').select('user_id, offline_allowed, discount_max_pct').eq('shop_id', S.shop.id),
     sb.from('devices').select('user_id, code, pending, last_seen').eq('shop_id', S.shop.id).order('last_seen', { ascending: false }),
     sb.from('alerts').select('id, kind, user_id, details, created_at, seen_at').eq('shop_id', S.shop.id).order('created_at', { ascending: false }).limit(30)]);
   if (m.error || d.error || a.error) throw new Error(cleanErr(m.error || d.error || a.error));
-  S.offAllowed = {}; (m.data || []).forEach(r => { S.offAllowed[r.user_id] = r.offline_allowed; });
+  S.offAllowed = {}; S.discMap = {};
+  (m.data || []).forEach(r => { S.offAllowed[r.user_id] = r.offline_allowed; S.discMap[r.user_id] = Number(r.discount_max_pct) || 0; });
   S.devices = d.data || []; S.alerts = a.data || [];
 }
 
@@ -485,6 +506,7 @@ function bindOfflineAdmin() {
     if (error) return toast(cleanErr(error), true);
     S.alertCount = 0; S.alerts = null; S.team = null; draw();
   };
+  document.querySelectorAll('[data-disc]').forEach(b => b.onclick = () => openDiscMax(b.dataset.disc));
   document.querySelectorAll('[data-off]').forEach(b => b.onclick = async () => {
     b.disabled = true;
     const to = b.dataset.to === '1';
@@ -555,7 +577,7 @@ function drawLogin(msg) {
 async function loadContext() {
   $('#app').innerHTML = '<p class="empty">Chargement…</p>';
   const { data, error } = await sb.from('shop_members')
-    .select('shop_id, role, display_name, offline_allowed, shops(name, shop_type, phone, address, invoice_footer, offline_max_pending)')
+    .select('shop_id, role, display_name, offline_allowed, discount_max_pct, shops(name, shop_type, phone, address, invoice_footer, offline_max_pending)')
     .eq('user_id', S.user.id).eq('active', true);
   if (error) {
     const c = readCache();
@@ -588,10 +610,11 @@ async function selectShop(id) {
   const m = S.memberships.find(x => x.shop_id === id);
   S.shop = { id, name: m.shops.name, type: m.shops.shop_type, who: m.display_name,
     phone: m.shops.phone || '', address: m.shops.address || '', footer: m.shops.invoice_footer || '',
-    offAllowed: !!m.offline_allowed, maxPending: Number(m.shops.offline_max_pending) || 30 };
+    offAllowed: !!m.offline_allowed, maxPending: Number(m.shops.offline_max_pending) || 30,
+    discMax: Number(m.discount_max_pct) || 0 };
   S.role = m.role;
   storage.setItem('bg_shop', id);
-  S.cart = new Map(); S.ref = uuid(); S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
+  S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
   await Promise.all([loadProducts(), loadSub(), loadAlertCount()]);
   draw();
@@ -734,10 +757,29 @@ function addToCart(id) {
   drawCart();
 }
 
+// Remise : texte d'aide et contrôle (le vrai contrôle est fait par la base).
+function discInfo(sub) {
+  const d = S.disc || 0, pct = sub ? Math.round(d * 10000 / sub) / 100 : 0;
+  const lim = S.role === 'owner' ? '' : ` · maximum ${String(S.shop.discMax || 0).replace('.', ',')} %`;
+  return d ? `${String(pct).replace('.', ',')} % du sous-total ${esc(money(sub))}${lim}` : (lim ? lim.slice(3) : '');
+}
+function discError(sub, d) {
+  if (!d) return '';
+  if (d < 0 || !Number.isInteger(d)) return 'Remise invalide.';
+  if (d > sub) return 'La remise ne peut pas dépasser le total de la vente.';
+  if (S.role !== 'owner' && d * 100 > sub * (S.shop.discMax || 0)) {
+    return `Remise trop élevée : votre maximum est ${String(S.shop.discMax || 0).replace('.', ',')} % (${money(Math.floor(sub * (S.shop.discMax || 0) / 100))} sur cette vente).`;
+  }
+  return '';
+}
+
 function drawCart() {
   const el = $('#cart'); if (!el) return;
   if (!S.cart.size) { el.innerHTML = '<h2>Panier</h2><p class="empty">Touchez un produit pour l\'ajouter.</p>'; return; }
-  const total = cartTotal();
+  const sub = cartTotal();
+  if (S.disc > sub) S.disc = 0;
+  const total = sub - S.disc;
+  const canDisc = S.role === 'owner' || (S.shop.discMax || 0) > 0;
   const lines = [...S.cart].map(([id, q]) => {
     const p = S.products.find(x => x.id === id);
     return `<div class="cartline">
@@ -747,6 +789,9 @@ function drawCart() {
     </div>`;
   }).join('');
   el.innerHTML = `<h2>Panier</h2>${lines}
+    ${canDisc ? `<div class="row" style="align-items:flex-end">
+      <label>Remise (FCFA)<input id="disc" type="number" inputmode="numeric" min="0" step="1" value="${S.disc || ''}" placeholder="0"></label>
+      <div class="muted" id="disc-info" style="font-size:13px;padding-bottom:12px">${discInfo(sub)}</div></div>` : ''}
     <div class="total"><span>Total</span><span class="num" id="total">${money(total)}</span></div>
     <div class="row">
       <label>Montant encaissé (FCFA)<input id="paid" type="number" inputmode="numeric" min="0" step="1" value="${total}"></label>
@@ -761,18 +806,27 @@ function drawCart() {
     drawCart();
   });
   el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.cart.delete(b.dataset.rm); drawCart(); });
-  $('#clear').onclick = () => { S.cart.clear(); S.ref = uuid(); drawCart(); };
+  $('#clear').onclick = () => { S.cart.clear(); S.ref = uuid(); S.disc = 0; drawCart(); };
+  const di = $('#disc');
+  if (di) di.oninput = () => {
+    const v = Math.round(Number(di.value) || 0);
+    S.disc = v > 0 ? v : 0;
+    const t = sub - Math.min(S.disc, sub);
+    $('#total').textContent = money(t); $('#paid').value = t; $('#disc-info').innerHTML = discInfo(sub);
+  };
   $('#validate').onclick = submitSale;
 }
 
 async function submitSale() {
   if (S.busy) return;
   S.busy = true; const b = $('#validate'); b.disabled = true; b.textContent = 'Enregistrement…';
-  const total = cartTotal();
+  const sub = cartTotal(), disc = S.disc || 0, total = sub - disc;
   const paidRaw = $('#paid').value.trim();
   const paid = paidRaw === '' ? total : Math.round(Number(paidRaw));
   const pay = $('#pay').value, customer = $('#cust').value.trim() || null;
-  if (S.offline) { S.busy = false; return queueSale(total, paid, pay, customer); }
+  const dErr = discError(sub, disc);
+  if (dErr) { S.busy = false; toast(dErr, true); return drawCart(); }
+  if (S.offline) { S.busy = false; return queueSale(total, paid, pay, customer, disc); }
   // Le propriétaire a peut-être changé un prix depuis l'ouverture de l'écran : on vérifie AVANT
   // d'encaisser, pour que le total affiché soit toujours le vrai total.
   try {
@@ -791,14 +845,14 @@ async function submitSale() {
   const items = [...S.cart].map(([product_id, quantity]) => ({ product_id, quantity }));
   const { data: newSale, error } = await sb.rpc('create_sale', {
     p_shop: S.shop.id, p_items: items, p_paid: paid,
-    p_payment_method: pay, p_customer: customer, p_client_ref: S.ref
+    p_payment_method: pay, p_customer: customer, p_client_ref: S.ref, ...(disc ? { p_discount: disc } : {})
   });
   S.busy = false;
   // Réseau coupé pendant l'envoi : si la vente hors ligne est permise, elle part dans la file
   // avec la MÊME référence. Si le serveur l'avait déjà reçue, il ne la comptera pas deux fois.
-  if (error && isNetErr(error) && offlineRight()) return queueSale(total, paid, pay, customer);
+  if (error && isNetErr(error) && offlineRight()) return queueSale(total, paid, pay, customer, disc);
   if (error) { toast(cleanErr(error), true); return drawCart(); }
-  S.cart.clear(); S.ref = uuid(); S.sales = null; S.summary = null; S.last = newSale ? { id: newSale, total } : null;
+  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.sales = null; S.summary = null; S.last = newSale ? { id: newSale, total } : null;
   toast('Vente enregistrée : ' + money(total));
   await loadProducts();
   viewSale();
@@ -922,7 +976,7 @@ function openSheet(kind, pid) {
 function closeSheet() { $('#sheet-host').innerHTML = ''; }
 
 /* ===== Onglet Historique ===== */
-const SALE_COLS = 'id,invoice_no,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
+const SALE_COLS = 'id,invoice_no,discount,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
 async function viewHistory() {
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
   if (!S.sales) {
@@ -943,6 +997,7 @@ async function viewHistory() {
       <div class="row" style="align-items:baseline"><b class="num">${money(s.total)}</b><span class="muted" style="flex:0 0 auto">${esc(invNo(s.invoice_no))}</span>
         <span class="muted" style="text-align:right">${dt(s.created_at)} · ${esc(PAY[s.payment_method])}</span></div>
       ${isManager() ? `<div class="muted">Vendu par ${esc((S.names && S.names[s.created_by]) || 'compte supprimé')}</div>` : ''}
+      ${s.discount > 0 ? `<div class="muted">Remise ${money(s.discount)} (prix normal ${money(s.total + s.discount)})</div>` : ''}
       ${s.offline ? `<div class="muted"><span class="tag warn">Hors ligne</span> réf. ${esc(s.offline_ref)}${s.client_created_at ? ' · faite à ' + dt(s.client_created_at) : ' · heure du téléphone inconnue'}</div>` : ''}
       <ul>${(s.sale_items || []).map(i => `<li>${qty(i.quantity)} ${esc(UNITS[i.products?.unit] || '')} ${esc(i.products?.name)} · ${money(i.line_total)}</li>`).join('')}</ul>
       <div>${s.status === 'cancelled' ? `<span class="tag bad">Annulée</span> <span class="muted">${esc(s.cancel_reason)}</span>` : ''}
@@ -993,6 +1048,7 @@ async function viewReport() {
         ${M('Ventes', d.revenue)}${M('Encaissé', d.collected)}
         ${M('Nombre de ventes', d.sales_count, 1)}${M('Marge brute', d.gross_margin)}
         ${M('Dépenses', d.operating_expenses)}${M('Résultat estimé', d.net_estimate)}
+        ${d.discounts != null ? M('Remises accordées', d.discounts) : ''}
       </div>
       ${d.low_stock_count > 0 ? `<div class="banner">${d.low_stock_count} produit(s) en stock bas.</div>` : ''}
       <p class="muted" style="font-size:13px">Le résultat est une estimation : marge brute moins dépenses et transport des achats. Les dates suivent l'heure du Burkina Faso (UTC).</p>
@@ -1064,7 +1120,8 @@ async function viewTeam() {
             ${m.role !== 'owner' ? `<div class="seg" style="margin-top:8px">
               <button class="btn ghost small" data-pw="${esc(m.user_id)}" ${canWrite() ? '' : 'disabled'}>Nouveau mot de passe</button>
               <button class="btn ghost small" data-act="${esc(m.user_id)}" data-to="${m.active ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${m.active ? 'Désactiver' : 'Réactiver'}</button>
-              <button class="btn ${S.offAllowed[m.user_id] ? '' : 'ghost'} small" data-off="${esc(m.user_id)}" data-to="${S.offAllowed[m.user_id] ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${S.offAllowed[m.user_id] ? 'Hors ligne : autorisé' : 'Hors ligne : non autorisé'}</button></div>` : ''}
+              <button class="btn ${S.offAllowed[m.user_id] ? '' : 'ghost'} small" data-off="${esc(m.user_id)}" data-to="${S.offAllowed[m.user_id] ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${S.offAllowed[m.user_id] ? 'Hors ligne : autorisé' : 'Hors ligne : non autorisé'}</button>
+              <button class="btn ghost small" data-disc="${esc(m.user_id)}" ${canWrite() ? '' : 'disabled'}>Remise max : ${esc(String(S.discMap[m.user_id] || 0).replace('.', ','))} %</button></div>` : ''}
           </div>
         </div>`).join('')}</div>
     </section>${offlineAdminHtml()}`;
@@ -1282,6 +1339,14 @@ function invoicePdf(inv) {
   if (top > 660) { header(false); }
   top += 24;
   const credit = inv.paid < inv.total;
+  if (inv.discount > 0) {
+    pdf.text(X_QTY - 20, top, 'Sous-total', { size: 10.5 });
+    pdf.text(X_AMT, top, plainMoney(inv.total + inv.discount) + ' FCFA', { size: 10.5, align: 'right' });
+    top += 17;
+    pdf.text(X_QTY - 20, top, 'Remise', { size: 10.5 });
+    pdf.text(X_AMT, top, '- ' + plainMoney(inv.discount) + ' FCFA', { size: 10.5, align: 'right' });
+    top += 21;
+  }
   pdf.text(X_QTY - 20, top, 'TOTAL', { size: 13, bold: true });
   pdf.text(X_AMT, top, plainMoney(inv.total) + ' FCFA', { size: 13, bold: true, align: 'right' });
   top += 20;
@@ -1299,7 +1364,7 @@ function invoicePdf(inv) {
 
 function invoiceText(inv) {
   const rows = inv.lines.map(l => `- ${plainQty(l.qty)}${l.unit ? ' ' + l.unit : ''} ${l.name} : ${plainMoney(l.total)} FCFA`);
-  return [`${inv.shop.name}`, `Facture ${inv.num} du ${dtFull(inv.date)}`, ...(inv.ref2 ? [`Réf. hors ligne : ${inv.ref2}`] : []), ...rows, `Total : ${plainMoney(inv.total)} FCFA`,
+  return [`${inv.shop.name}`, `Facture ${inv.num} du ${dtFull(inv.date)}`, ...(inv.ref2 ? [`Réf. hors ligne : ${inv.ref2}`] : []), ...rows, ...(inv.discount > 0 ? [`Remise : -${plainMoney(inv.discount)} FCFA`] : []), `Total : ${plainMoney(inv.total)} FCFA`,
     ...(inv.paid < inv.total ? [`Reste à payer : ${plainMoney(inv.total - inv.paid)} FCFA`] : []),
     ...(inv.shop.footer ? ['', inv.shop.footer] : [])].join('\n');
 }
@@ -1328,7 +1393,7 @@ async function buildInvoice(s) {
     date: s.client_created_at || s.created_at, seller, customer: s.customer_name || '', pay: PAY[s.payment_method] || '',
     lines: (s.sale_items || []).map(i => ({ name: i.products?.name || 'Produit', unit: UNITS[i.products?.unit] || '',
       qty: i.quantity, price: i.unit_price, total: i.line_total })),
-    total: s.total, paid: s.paid
+    total: s.total, paid: s.paid, discount: s.discount || 0
   };
 }
 
@@ -1371,6 +1436,7 @@ async function openInvoice(saleOrId) {
       ${inv.ref2 ? `<div class="muted">Réf. hors ligne : ${esc(inv.ref2)}</div>` : ''}
       ${inv.customer ? `<div>Client : <b>${esc(inv.customer)}</b></div>` : ''}
       <ul style="margin:6px 0 0;padding-left:18px">${inv.lines.map(l => `<li>${esc(plainQty(l.qty))} ${esc(l.unit)} ${esc(l.name)} · ${esc(money(l.total))}</li>`).join('')}</ul>
+      ${inv.discount > 0 ? `<div class="muted">Remise : − ${esc(money(inv.discount))}</div>` : ''}
       <div class="total" style="margin-top:6px"><span>Total</span><span class="num">${esc(money(inv.total))}</span></div>
       ${inv.paid < inv.total ? `<div style="color:var(--bad);font-weight:600">Reste à payer : ${esc(money(inv.total - inv.paid))}</div>` : ''}
     </div>
