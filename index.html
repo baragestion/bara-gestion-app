@@ -117,6 +117,19 @@ button.prod:hover{border-color:var(--accent)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:30;background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:10px;max-width:92vw;font-weight:500;box-shadow:0 4px 18px rgba(0,0,0,.25)}
 .toast.err{background:var(--bad);color:#fff}
 @media (prefers-reduced-motion:no-preference){.toast{animation:up .2s ease-out}@keyframes up{from{opacity:0;transform:translate(-50%,8px)}}}
+
+/* Code d'accès */
+#lock-host{position:fixed;inset:0;z-index:100;background:var(--bg);overflow:auto}
+#lock-host:focus{outline:none}
+.lock{max-width:340px;margin:0 auto;min-height:100%;padding:max(32px,env(safe-area-inset-top,0px)) 16px calc(20px + env(safe-area-inset-bottom,0px));display:grid;gap:16px;align-content:center;text-align:center}
+.lock .dots{display:flex;justify-content:center;gap:14px;height:22px}
+.lock .dots span{width:16px;height:16px;border-radius:50%;border:2px solid var(--accent)}
+.lock .dots span.on{background:var(--accent)}
+.lock .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.lock .pad button{height:62px;border-radius:14px;border:1px solid var(--line);background:var(--surface);font:700 26px var(--f-display);cursor:pointer}
+.lock .pad button:active{background:var(--accent-soft)}
+.lock .msg{min-height:22px;font-weight:600}
+.lock .msg.bad{color:var(--bad)}
 </style>
 
 </head>
@@ -145,7 +158,7 @@ async function leave(msg) {
   try { await Promise.race([sb.auth.signOut({ scope: 'local' }), new Promise(r => setTimeout(r, 4000))]); } catch (e) {}
   try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch (e) {}
   Object.keys(mem).filter(k => k.startsWith('sb-')).forEach(k => delete mem[k]);
-  clearCache();
+  clearCache(); clearPin(); dropLock();
   S.user = null; S.kick = null; S.offline = false;
   drawLogin(msg || null);
 }
@@ -160,7 +173,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26a';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26b';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -204,7 +217,7 @@ function saveCache() {
       shop: { id: S.shop.id, name: S.shop.name, type: S.shop.type, who: S.shop.who,
               phone: S.shop.phone, address: S.shop.address, footer: S.shop.footer,
               offAllowed: !!S.shop.offAllowed, maxPending: S.shop.maxPending || 30, discMax: S.shop.discMax || 0,
-              creditAllowed: !!S.shop.creditAllowed },
+              creditAllowed: !!S.shop.creditAllowed, lockMin: lockMin(), bioAllowed: bioAllowed() },
       // Clients (nom, téléphone) gardés seulement pour ceux qui peuvent vendre à crédit, pour le crédit hors ligne.
       customers: canCredit() && S.customers ? S.customers.filter(c => c.active !== false && c.phone)
         .map(c => ({ id: c.id, name: c.name, phone: c.phone, balance: c.balance, active: true })) : [],
@@ -234,6 +247,7 @@ function startOffline(c) {
   S.memberships = [{ shop_id: c.shop.id, role: c.role, display_name: c.shop.who, shops: { name: c.shop.name } }];
   S.products = c.products; S.costs = {}; S.sub = { status: 'offline' }; S.cachedAt = c.savedAt;
   S.cart = new Map(); S.ref = uuid(); S.last = null; S.editQuote = null; S.quotes = null; S.sales = null; S.summary = null; S.team = null; S.tab = 'sale';
+  gate();
   draw();
   // Le signal « réseau revenu » arrive parfois avant que la connexion soit utilisable : on réessaie.
   clearTimeout(S.retry);
@@ -541,11 +555,224 @@ function bindOfflineAdmin() {
   });
 }
 
+/* ===== Code d'accès (PIN) et empreinte digitale =====
+   - Code de 4 à 6 chiffres, OBLIGATOIRE, demandé à chaque ouverture de l'application et après
+     X minutes sans utilisation (réglé par le propriétaire, 5 par défaut).
+   - Le code ne quitte jamais le téléphone : on n'y garde que son empreinte brouillée (PBKDF2,
+     150 000 tours, sel au hasard). Il marche donc aussi hors ligne.
+   - 5 codes faux de suite : déconnexion complète (le mot de passe sera demandé). Les ventes
+     hors ligne non envoyées restent dans le téléphone.
+   - Code oublié : « Se reconnecter avec le mot de passe », puis on choisit un nouveau code.
+   - Empreinte digitale : en option, si le propriétaire la permet. Elle passe par le lecteur du
+     téléphone (WebAuthn) : l'empreinte elle-même ne quitte jamais le téléphone.
+   Limite honnête : c'est un verrou d'écran contre une personne qui prend le téléphone ; il ne
+   remplace pas le mot de passe ni les contrôles faits par la base. */
+const PIN_KEY = 'bg_pin_v1', PIN_ITER = 150000, PIN_MAX_FAILS = 5;
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = str => Uint8Array.from(atob(str), c => c.charCodeAt(0));
+function pinRec() {
+  try {
+    const r = JSON.parse(storage.getItem(PIN_KEY) || 'null');
+    return r && S.user && r.u === S.user.id && r.salt && r.hash ? r : null;
+  } catch (e) { return null; }
+}
+const savePinRec = r => storage.setItem(PIN_KEY, JSON.stringify(r));
+const clearPin = () => storage.removeItem(PIN_KEY);
+async function pinHash(pin, salt, iter) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+  return b64(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: unb64(salt), iterations: iter }, key, 256));
+}
+// Codes trop faciles à deviner : tous les chiffres pareils, ou une suite (1234, 9876…).
+function weakPin(p) {
+  if (/^(\d)\1+$/.test(p)) return true;
+  const up = '01234567890', down = '09876543210';
+  return up.includes(p) || down.includes(p);
+}
+const lockMin = () => Math.min(30, Math.max(1, Number(S.shop && S.shop.lockMin) || 5));
+const bioAllowed = () => !(S.shop && S.shop.bioAllowed === false);
+async function bioAvailable() {
+  try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); }
+  catch (e) { return false; }
+}
+
+// Appelé quand l'application est prête (ouverture, connexion, hors ligne) : rien n'est visible
+// tant que le code n'a pas été donné ou créé.
+function gate() {
+  if (S.unlocked) return;
+  if (pinRec()) lock(); else pinSetup(false);
+}
+function lockHost() {
+  let h = document.getElementById('lock-host');
+  if (!h) { h = document.createElement('div'); h.id = 'lock-host'; h.setAttribute('role', 'dialog'); h.setAttribute('aria-modal', 'true'); document.body.appendChild(h); }
+  $('#app').inert = true; $('#app').setAttribute('aria-hidden', 'true');
+  return h;
+}
+function unlockDone() {
+  S.unlocked = true; S.lastAct = Date.now();
+  const h = document.getElementById('lock-host'); if (h) h.remove();
+  $('#app').inert = false; $('#app').removeAttribute('aria-hidden');
+}
+function dropLock() {          // à la déconnexion
+  S.unlocked = false;
+  const h = document.getElementById('lock-host'); if (h) h.remove();
+  if ($('#app')) { $('#app').inert = false; $('#app').removeAttribute('aria-hidden'); }
+}
+
+// Pavé numérique commun à l'écran de verrouillage et à la création du code.
+function pinPad(h, { title, sub, max, onDone, extra }) {
+  let v = '';
+  h.innerHTML = `<div class="lock">
+    <div><div class="brand" style="font-size:22px">${esc(S.shop ? S.shop.name : 'Bara Gestion')}</div>
+      <div class="muted" style="margin-top:4px">${esc(S.shop ? S.shop.who : '')}</div></div>
+    <h2 style="font-size:20px">${esc(title)}</h2>
+    ${sub ? `<div class="muted" style="font-size:13.5px">${sub}</div>` : ''}
+    <div class="dots" aria-hidden="true">${Array.from({ length: max }, () => '<span></span>').join('')}</div>
+    <div class="msg" id="pin-msg" role="alert"></div>
+    <div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button type="button" data-k="${n}" aria-label="${n}">${n}</button>`).join('')}
+      <button type="button" data-k="del" aria-label="Effacer">⌫</button><button type="button" data-k="0" aria-label="0">0</button>
+      <button type="button" data-k="ok" aria-label="Valider">✓</button></div>
+    ${extra || ''}</div>`;
+  const dots = () => h.querySelectorAll('.dots span').forEach((d, i) => d.classList.toggle('on', i < v.length));
+  const msg = (t, bad) => { const m = h.querySelector('#pin-msg'); m.textContent = t || ''; m.className = 'msg' + (bad ? ' bad' : ''); };
+  const press = async k => {
+    if (h.dataset.busy) return;
+    if (k === 'del') v = v.slice(0, -1);
+    else if (k === 'ok') { if (v.length < 4) return msg('Au moins 4 chiffres.', true); h.dataset.busy = '1'; const r = await onDone(v, msg); h.dataset.busy = ''; if (r !== 'keep') { v = ''; } }
+    else if (v.length < max) { v += k; msg(''); }
+    dots();
+    // 6 chiffres tapés : validation automatique.
+    if (k !== 'ok' && k !== 'del' && v.length === max) press('ok');
+  };
+  h.querySelectorAll('[data-k]').forEach(b => b.onclick = () => press(b.dataset.k));
+  h.onkeydown = ev => { if (/^\d$/.test(ev.key)) press(ev.key); else if (ev.key === 'Backspace') press('del'); else if (ev.key === 'Enter') press('ok'); };
+  h.tabIndex = -1; h.focus();
+  return { msg };
+}
+
+// Création (ou changement) du code : tapé deux fois.
+function pinSetup(change) {
+  stopScan();
+  const h = lockHost();
+  let first = null;
+  const step = () => { pinPad(h, {
+    title: first ? 'Retapez le même code' : (change ? 'Nouveau code d\'accès' : 'Créez votre code d\'accès'),
+    sub: first ? '' : 'De 4 à 6 chiffres, facile à retenir pour vous, difficile à deviner. Il sera demandé à chaque ouverture.',
+    max: 6,
+    extra: change ? '<button class="btn ghost" type="button" id="pin-cancel">Annuler</button>' : '',
+    onDone: async (v, msg) => {
+      if (!first) {
+        if (weakPin(v)) { msg('Code trop facile (ex. 1234 ou 0000). Choisissez-en un autre.', true); return; }
+        first = v; step(); return;
+      }
+      if (v !== first) { first = null; step(); setTimeout(() => toast('Les deux codes sont différents. Recommencez.', true), 0); return; }
+      const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+      const old = pinRec();
+      savePinRec({ u: S.user.id, salt, it: PIN_ITER, hash: await pinHash(v, salt, PIN_ITER), fails: 0, bio: old ? old.bio || null : null });
+      unlockDone();
+      toast(change ? 'Code d\'accès changé.' : 'Code d\'accès créé. Il sera demandé à chaque ouverture.');
+    }
+  }); const x = $('#pin-cancel'); if (x) x.onclick = () => unlockDone(); };
+  step();
+}
+
+// Écran de verrouillage.
+async function lock() {
+  if (!S.user) return;
+  const rec = pinRec();
+  if (!rec) return pinSetup(false);
+  S.unlocked = false; stopScan();
+  const h = lockHost(); h.innerHTML = '<div class="lock"></div>';
+  const bio = rec.bio && bioAllowed() && await bioAvailable();
+  if (S.unlocked || !S.user) return;
+  pinPad(h, {
+    title: 'Tapez votre code', max: 6,
+    extra: `${bio ? '<button class="btn" type="button" id="pin-bio">Ouvrir avec l\'empreinte</button>' : ''}
+      <button class="btn ghost small" type="button" id="pin-forgot">Code oublié ? Se reconnecter avec le mot de passe</button>`,
+    onDone: async (v, msg) => {
+      const r = pinRec(); if (!r) return pinSetup(false);
+      if (await pinHash(v, r.salt, r.it || PIN_ITER) === r.hash) { r.fails = 0; savePinRec(r); unlockDone(); return; }
+      r.fails = (r.fails || 0) + 1; savePinRec(r);
+      if (r.fails >= PIN_MAX_FAILS) { clearPin(); dropLock(); return leave('5 codes faux : par sécurité, reconnectez-vous avec votre mot de passe.'); }
+      msg(`Code faux. Encore ${PIN_MAX_FAILS - r.fails} essai(s) avant la déconnexion.`, true);
+    }
+  });
+  const fg = $('#pin-forgot');
+  if (fg) fg.onclick = () => {
+    if (!fg.dataset.sure) { fg.dataset.sure = '1'; fg.textContent = myQueue().length ? 'Confirmer (les ventes non envoyées restent gardées)' : 'Confirmer : se déconnecter'; return; }
+    clearPin(); dropLock(); leave();
+  };
+  const bb = $('#pin-bio'); if (bb) bb.onclick = () => bioUnlock();
+}
+
+async function bioUnlock() {
+  const r = pinRec(); if (!r || !r.bio) return;
+  try {
+    const cred = await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)), timeout: 60000, userVerification: 'required',
+      allowCredentials: [{ type: 'public-key', id: unb64(r.bio) }] } });
+    const flags = new Uint8Array(cred.response.authenticatorData)[32];
+    if (!(flags & 4)) throw new Error('uv');                 // le téléphone doit avoir vérifié l'empreinte (ou son propre code)
+    r.fails = 0; savePinRec(r); unlockDone();
+  } catch (e) {
+    if (e && e.name === 'NotAllowedError') return;          // annulé par la personne
+    toast('Empreinte non reconnue : tapez votre code.', true);
+  }
+}
+
+async function bioEnroll() {
+  const r = pinRec(); if (!r) return;
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: 'Bara Gestion' },
+      user: { id: new TextEncoder().encode(S.user.id), name: S.shop.who || 'utilisateur', displayName: S.shop.who || 'utilisateur' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+      timeout: 60000, attestation: 'none' } });
+    r.bio = b64(cred.rawId); savePinRec(r);
+    toast('Empreinte activée.');
+  } catch (e) {
+    if (e && e.name === 'NotAllowedError') return;
+    toast('Impossible d\'activer l\'empreinte sur ce téléphone.', true);
+  }
+}
+
+// « Mon code » : verrouiller, changer le code, empreinte.
+async function myLockSheet() {
+  const r = pinRec(), can = bioAllowed() && await bioAvailable();
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Code d'accès">
+    <h2>Code d'accès</h2>
+    <p class="muted" style="margin:0;font-size:13.5px">L'application se verrouille après ${lockMin()} minute(s) sans utilisation, et à chaque ouverture.</p>
+    <button class="btn" id="lk-now">🔒 Verrouiller maintenant</button>
+    <button class="btn ghost" id="lk-change">Changer mon code</button>
+    ${!bioAllowed() ? '<p class="muted" style="margin:0;font-size:13px">Empreinte digitale : désactivée par le propriétaire.</p>'
+      : !can ? '<p class="muted" style="margin:0;font-size:13px">Empreinte digitale : pas disponible sur ce téléphone ou ce navigateur.</p>'
+      : r && r.bio ? '<button class="btn ghost" id="lk-bio-off">Ne plus utiliser l\'empreinte</button>'
+      : `<div class="banner">Attention : <b>toutes</b> les empreintes enregistrées dans ce téléphone pourront ouvrir l'application (par exemple celles de votre famille). N'activez que si vous êtes seul à avoir mis vos empreintes dans ce téléphone.</div>
+         <button class="btn ghost" id="lk-bio-on">Activer l'empreinte</button>`}
+    <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#lk-now').onclick = () => { closeSheet(); lock(); };
+  $('#lk-change').onclick = () => { closeSheet(); pinSetup(true); };
+  const on = $('#lk-bio-on'); if (on) on.onclick = async () => { await bioEnroll(); myLockSheet(); };
+  const off = $('#lk-bio-off'); if (off) off.onclick = () => { const x = pinRec(); if (x) { x.bio = null; savePinRec(x); } toast('Empreinte désactivée.'); myLockSheet(); };
+}
+
+// Verrouillage automatique après inactivité (et au retour dans l'application).
+S.lastAct = Date.now();
+['pointerdown', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { if (S.unlocked) S.lastAct = Date.now(); }, { passive: true, capture: true }));
+function idleCheck() {
+  if (S.user && S.unlocked && Date.now() - S.lastAct > lockMin() * 60000) lock();
+}
+setInterval(idleCheck, 10000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') idleCheck(); });
+
 /* ===== Démarrage ===== */
 async function boot() {
   let session = null;
   try { session = (await sb.auth.getSession()).data.session; } catch (e) {}
-  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { clearCache(); S.user = null; const m = S.kick; S.kick = null; drawLogin(m); } });
+  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { clearCache(); clearPin(); dropLock(); S.user = null; const m = S.kick; S.kick = null; drawLogin(m); } });
   if (session) { S.user = session.user; await loadContext(); }
   else {
     // Pas de session lisible : sans réseau, on rouvre la copie locale si elle est valide et récente.
@@ -593,6 +820,7 @@ function drawLogin(msg) {
     const { data, error } = await sb.auth.signInWithPassword({ email: login, password: $('#password').value });
     if (error) return drawLogin(cleanErr(error));
     S.user = data.user;
+    clearPin(); S.unlocked = false;       // connexion par mot de passe : on choisit (ou rechoisit) son code
     try { await sb.rpc('claim_single_session'); } catch (e) {}   // vendeurs et gérants : un seul appareil à la fois
     await loadContext();
   });
@@ -640,10 +868,20 @@ async function selectShop(id) {
   storage.setItem('bg_shop', id);
   S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
-  await Promise.all([loadProducts().then(() => canCredit() ? loadCustomers(true) : null), loadSub(), loadAlertCount(), loadCountState(), loadCash()]);
+  await Promise.all([loadProducts().then(() => canCredit() ? loadCustomers(true) : null), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings()]);
+  saveCache();
+  gate();
   draw();
   registerDevice();
   syncQueue();
+}
+
+// Réglages du verrouillage (propriétaire). Avant la migration 012 : valeurs par défaut.
+async function loadLockSettings() {
+  try {
+    const { data, error } = await sb.from('shops').select('lock_minutes, biometric_allowed').eq('id', S.shop.id).maybeSingle();
+    if (!error && data) { S.shop.lockMin = Number(data.lock_minutes) || 5; S.shop.bioAllowed = data.biometric_allowed !== false; }
+  } catch (e) {}
 }
 
 async function loadSub() {
@@ -716,7 +954,8 @@ function draw() {
                   : `<div class="shopname">${esc(S.shop.name)}</div>`}
           <div class="who">${esc(S.shop.who)} · ${esc(ROLES[S.role])}</div>
         </div>
-        <button class="btn ghost small" id="logout">Quitter</button>
+        <div style="display:flex;gap:6px;flex:0 0 auto"><button class="btn ghost small" id="lockb" aria-label="Code d'accès et verrouillage">🔒</button>
+        <button class="btn ghost small" id="logout">Quitter</button></div>
       </div>
       ${banner()}
     </header>
@@ -724,6 +963,7 @@ function draw() {
     <nav class="tabs${tabs.length > 5 ? ' many' : ''}" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k || (S.tab==='count' && k==='products')?'aria-current="page"':''}><span class="ic" aria-hidden="true">${TAB_IC[k] || ''}</span><span>${l}</span></button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
   $('#logout').onclick = askLeave;
+  $('#lockb').onclick = myLockSheet;
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { stopScan(); S.tab = b.dataset.tab; draw(); });
   ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash, clients: viewClients })[S.tab]();
@@ -1990,8 +2230,23 @@ async function viewTeam() {
               ${m.role === 'seller' ? `<button class="btn ${S.creditMap[m.user_id] ? '' : 'ghost'} small" data-cr="${esc(m.user_id)}" data-to="${S.creditMap[m.user_id] ? '0' : '1'}" ${canWrite() ? '' : 'disabled'}>${S.creditMap[m.user_id] ? 'Crédit : autorisé' : 'Crédit : non autorisé'}</button>` : ''}</div>` : ''}
           </div>
         </div>`).join('')}</div>
+    </section>
+    <section class="card stack"><h2>Code d'accès des téléphones</h2>
+      <p class="muted" style="margin:0;font-size:13.5px">Chaque personne a son code (4 à 6 chiffres), demandé à chaque ouverture de l'application. 5 codes faux = déconnexion.</p>
+      <label>Verrouiller après (sans utilisation)<select id="lk-min">${[1, 2, 3, 5, 10, 15, 20, 30].map(n => `<option value="${n}" ${n === lockMin() ? 'selected' : ''}>${n} minute${n > 1 ? 's' : ''}</option>`).join('')}</select></label>
+      <div style="display:flex;align-items:center;gap:10px"><input id="lk-bio" type="checkbox" ${bioAllowed() ? 'checked' : ''} style="width:22px;height:22px;flex:0 0 auto;margin:0">
+        <span style="font-size:14px">Permettre d'ouvrir avec l'empreinte digitale</span></div>
+      <p class="muted" style="margin:0;font-size:12.5px">Avec l'empreinte, toutes les empreintes enregistrées dans le téléphone de l'employé ouvrent l'application.</p>
+      <button class="btn ghost small" id="lk-save" ${canWrite() ? '' : 'disabled'}>Enregistrer</button>
     </section>${offlineAdminHtml()}`;
   bindOfflineAdmin();
+  $('#lk-save').onclick = async () => {
+    const m = Number($('#lk-min').value), bio = $('#lk-bio').checked;
+    const { error } = await sb.rpc('set_lock_settings', { p_shop: S.shop.id, p_minutes: m, p_biometric: bio });
+    if (error) return toast(/set_lock_settings/.test(error.message || '') ? 'Installez d\'abord la mise à jour 012 dans Supabase.' : cleanErr(error), true);
+    S.shop.lockMin = m; S.shop.bioAllowed = bio; saveCache();
+    toast('Réglages enregistrés. Les employés les reçoivent à leur prochaine ouverture.');
+  };
   $('#addm').onclick = openAddMember;
   $('#editshop').onclick = openShopProfile;
   document.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => openResetPassword(b.dataset.pw));
