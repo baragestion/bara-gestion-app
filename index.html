@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26p';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26q';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1168,7 +1168,9 @@ function cartTotal() {
 function viewSale() {
   if (S.payOpen && S.cart.size) return viewPay();
   S.payOpen = false; document.body.classList.remove('paying');
-  const cats = [...new Set(S.products.map(p => p.category).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'fr'));
+  const FIRST = ['Smartphones', 'Téléphones simples'];   // les téléphones d'abord, puis les autres rayons par ordre alphabétique
+  const rank = c => { const i = FIRST.indexOf(c); return i < 0 ? 99 : i; };
+  const cats = [...new Set(S.products.map(p => p.category).filter(Boolean))].sort((x, y) => rank(x) - rank(y) || x.localeCompare(y, 'fr'));
   if (S.cat && !cats.includes(S.cat)) S.cat = '';
   $('#view').innerHTML = `${!S.offline && S.cash && !S.cash.open ? '<div class="banner">Caisse non ouverte. <button class="btn small" id="go-cash" style="margin-left:6px">Ouvrir la caisse</button></div>' : ''}
     ${S.last ? `<section class="card" style="display:grid;gap:8px;border-color:var(--accent)">
@@ -1179,7 +1181,7 @@ function viewSale() {
     <div style="display:flex;gap:8px">
       <input id="q" type="search" placeholder="🔍 Chercher un produit" value="${esc(S.q)}" autocomplete="off" aria-label="Chercher un produit ou taper un code-barres" style="flex:1 1 auto;height:50px;font-size:16px">
       ${canScan() ? '<button class="btn" type="button" id="scan" style="flex:0 0 auto;width:58px;height:50px;font-size:22px;padding:0" aria-label="Scanner un code-barres">📷</button>' : ''}</div>
-    ${cats.length > 1 ? `<div class="chips" role="group" aria-label="Catégories"><button aria-pressed="${!S.cat}" data-cat="">Tout</button>${cats.map(c => `<button aria-pressed="${S.cat === c}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
+    <div id="folder-head"></div>
     <div class="tiles" id="plist"></div>
     <div id="bar-space"></div>`;
   const q = $('#q');
@@ -1194,7 +1196,7 @@ function viewSale() {
     if (hit) { addToCart(hit.id); S.q = ''; q.value = ''; drawProducts(); }
     else toast('Aucun produit avec ce code.', true);
   };
-  document.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { S.cat = b.dataset.cat; viewSale(); });
+  S.saleCats = cats;
   const li = $('#last-inv'); if (li) li.onclick = () => S.last.rec ? openInvoice(recToSale(S.last.rec)) : openInvoice(S.last.id);
   const lx = $('#last-x'); if (lx) lx.onclick = () => { S.last = null; viewSale(); };
   drawProducts(); drawCart();
@@ -1234,7 +1236,8 @@ const ART = [
   [/pagne|tissu|chemise|t-?shirt|robe|pantalon|habit/i, '<path d="M22 10l-12 8 6 10 6-4v30h20V24l6 4 6-10-12-8q-4 6-10 6t-10-6Z" fill="#7FB2E5" stroke="#2F5DA8" stroke-width="2.5" stroke-linejoin="round"/>'],
   [/chaussure|sandale|basket/i, '<path d="M8 40q2-14 14-14l8 8q10 4 22 4 6 0 6 6v4H8Z" fill="#8A5A2B" stroke="#4E3418" stroke-width="2.5" stroke-linejoin="round"/>'],
 ];
-function artFor(name) { const a = ART.find(([re]) => re.test(name || '')); return a ? `<svg viewBox="0 0 64 64" width="46" height="46" aria-hidden="true">${a[1]}</svg>` : ''; }
+function artFor(name, cat) { const a = ART.find(([re]) => re.test(name || '')) || (/smartphone|t[ée]l[ée]phone/i.test(cat || '') ? ART[0] : null);
+  return a ? `<svg viewBox="0 0 64 64" width="46" height="46" aria-hidden="true">${a[1]}</svg>` : ''; }
 
 // Couleur et lettres de la tuile : même couleur pour une même catégorie.
 const TILE_COLORS = [['#E3F1E8', '#1f6b4a'], ['#E8EEF8', '#2F5DA8'], ['#FBF1D6', '#8A6100'], ['#F7E6E3', '#B42318'], ['#EEE8F6', '#6941C6'], ['#E2F2F4', '#0E6874'], ['#F6E8DA', '#8A4B12']];
@@ -1245,13 +1248,36 @@ function tileColor(key) {
 const initials = n => { const w = String(n).replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
   return ((w[0] || '?').slice(0, w.length > 1 ? 1 : 2) + (w.length > 1 ? (/\d/.test(w[1]) ? w[1].slice(0, 2) : w[1][0]) : '')).toUpperCase(); };
 
+// Rayons en grosses cases : avec beaucoup de produits, on choisit d'abord le rayon (ex. Smartphones,
+// Téléphones simples, Accessoires), puis le produit. La recherche et le scan cherchent partout.
+const FOLDER_IC = [[/smartphone/i, '📱'], [/t[ée]l[ée]phone|simple/i, '☎️'], [/accessoire/i, '🎧'], [/ciment|construction|ma[çc]onnerie/i, '🧱'],
+  [/fer/i, '🔩'], [/t[ôo]le/i, '🏠'], [/peinture/i, '🎨'], [/plomberie/i, '🚰'], [/[ée]lectri/i, '💡'], [/outil/i, '🛠️'], [/bois/i, '🪵'], [/clou/i, '📌'],
+  [/pagne/i, '🧵'], [/homme/i, '👔'], [/femme/i, '👗'], [/enfant/i, '🧒'], [/chaussure/i, '👟'], [/c[ée]r[ée]ale|riz/i, '🌾'], [/huile/i, '🫙'],
+  [/boisson|lait/i, '🥤'], [/entretien|hygi[èe]ne/i, '🧼'], [/corps/i, '🧴'], [/cheveu/i, '💇'], [/maquillage/i, '💄'], [/moto/i, '🏍️'], [/v[ée]lo/i, '🚲']];
+const folderIc = c => (FOLDER_IC.find(([re]) => re.test(c)) || [0, '📦'])[1];
 function drawProducts() {
-  const t = S.q.trim().toLowerCase();
-  const list = S.products.filter(p => (!S.cat || p.category === S.cat) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t)).slice(0, 90);
+  const t = S.q.trim().toLowerCase(), cats = S.saleCats || [];
+  const folders = cats.length > 1 && S.products.length > 9;
+  const head = $('#folder-head');
+  if (folders && !S.cat && !t) {
+    if (head) head.innerHTML = '';
+    $('#plist').className = 'htiles';
+    $('#plist').innerHTML = cats.map(c => { const list = S.products.filter(p => p.category === c);
+      const inCart = list.reduce((a, p) => a + (S.cart.get(p.id) ? 1 : 0), 0);
+      return `<button class="htile" data-folder="${esc(c)}" style="min-height:118px"><span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${folderIc(c)}</span>
+        ${inCart ? `<span class="hbadge">${inCart} au panier</span>` : ''}<span class="hl">${esc(c)}</span><span class="muted" style="font-size:12.5px;font-weight:400">${list.length} produit${list.length > 1 ? 's' : ''}</span></button>`; }).join('');
+    document.querySelectorAll('[data-folder]').forEach(b => b.onclick = () => { S.cat = b.dataset.folder; drawProducts(); window.scrollTo(0, 0); });
+    return;
+  }
+  $('#plist').className = 'tiles';
+  if (head) head.innerHTML = folders && S.cat && !t ? `<div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="folder-back" style="flex:0 0 auto">‹ Rayons</button>
+    <h2 style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${folderIc(S.cat)} ${esc(S.cat)}</h2></div>` : '';
+  const fb = $('#folder-back'); if (fb) fb.onclick = () => { S.cat = ''; drawProducts(); };
+  const list = S.products.filter(p => (t || !S.cat || p.category === S.cat) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t)).slice(0, 90);
   $('#plist').innerHTML = list.length ? list.map(p => {
     const [bg, fg] = tileColor(p.category || p.name), inCart = S.cart.get(p.id), out = Number(p.stock_qty) <= 0;
     return `<button class="tile${inCart ? ' in' : ''}" data-add="${esc(p.id)}" ${out && !S.offline ? 'disabled' : ''} aria-label="${esc(p.name)}, ${esc(money(p.sell_price))}${inCart ? ', ' + esc(qty(inCart)) + ' dans le panier' : ''}">
-      ${artFor(p.name) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(p.name)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>`}
+      ${artFor(p.name, p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(p.name, p.category)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>`}
       <span class="tn">${esc(p.name)}</span>
       ${out ? '<span class="ts">Épuisé</span>' : `<span class="tp">${esc(fmtNum.format(p.sell_price))}</span>`}
       ${inCart ? `<span class="tq" aria-hidden="true">${esc(qty(inCart))}</span>` : ''}</button>`;
@@ -1268,7 +1294,7 @@ function addToCart(id) {
   }
   S.cart.set(id, cur + 1);
   try { navigator.vibrate && navigator.vibrate(25); } catch (e) {}
-  if ($('#plist') && !S.payOpen) drawProducts();
+  if ($('#plist') && !S.payOpen && $('#plist').className === 'tiles') drawProducts();
   drawCart();
 }
 
@@ -1491,7 +1517,7 @@ async function submitSale() {
 
 /* ===== Onglet Produits ===== */
 function prodIcon(p, size, extra) {
-  const art = artFor(p.name), [bg, fg] = tileColor(p.category || p.name), st = `width:${size}px;height:${size}px;${extra || ''}`;
+  const art = artFor(p.name, p.category), [bg, fg] = tileColor(p.category || p.name), st = `width:${size}px;height:${size}px;${extra || ''}`;
   return art ? `<span class="pic" style="background:#F6F4EE;${st}" aria-hidden="true">${art}</span>`
              : `<span class="pic" style="background:${bg};color:${fg};${st}" aria-hidden="true">${esc(initials(p.name))}</span>`;
 }
@@ -1536,11 +1562,10 @@ const CATALOG = {
     ['Roulement', 'piece', 'Divers'], ['Boulons et écrous', 'kilo', 'Divers'], ['Rustine', 'piece', 'Divers'], ['Clé plate', 'piece', 'Divers'],
   ],
   telephones: [
-    ['Téléphone simple', 'piece', 'Téléphones'], ['Smartphone', 'piece', 'Téléphones'],
     ['Chargeur', 'piece', 'Accessoires'], ['Câble USB', 'piece', 'Accessoires'], ['Écouteurs', 'piece', 'Accessoires'], ['Kit main libre', 'piece', 'Accessoires'],
     ['Batterie de téléphone', 'piece', 'Accessoires'], ['Batterie externe', 'piece', 'Accessoires'], ['Coque', 'piece', 'Accessoires'], ["Verre de protection d'écran", 'piece', 'Accessoires'],
-    ['Carte mémoire', 'piece', 'Mémoire'], ['Clé USB', 'piece', 'Mémoire'], ['Carte SIM', 'piece', 'Divers'],
-    ['Haut-parleur Bluetooth', 'piece', 'Divers'], ['Lampe torche rechargeable', 'piece', 'Divers'], ['Piles', 'piece', 'Divers'], ['Adaptateur de prise', 'piece', 'Divers'], ['Multiprise', 'piece', 'Divers'],
+    ['Carte mémoire', 'piece', 'Accessoires'], ['Clé USB', 'piece', 'Accessoires'], ['Carte SIM', 'piece', 'Accessoires'],
+    ['Haut-parleur Bluetooth', 'piece', 'Accessoires'], ['Lampe torche rechargeable', 'piece', 'Accessoires'], ['Piles', 'piece', 'Accessoires'], ['Adaptateur de prise', 'piece', 'Accessoires'], ['Multiprise', 'piece', 'Accessoires'],
   ],
   cosmetiques: [
     ['Savon de toilette', 'piece', 'Corps'], ['Crème de corps', 'piece', 'Corps'], ['Lait de corps', 'piece', 'Corps'], ['Pommade', 'piece', 'Corps'], ['Vaseline', 'piece', 'Corps'],
@@ -1563,18 +1588,81 @@ const catItems = () => (CATALOG[S.shop.type] || []).map(([name, unit, category])
 const nameKey = n => String(n).trim().toLowerCase();
 const unitAu = u => (['piece', 'barre', 'paire'].includes(u) ? 'à la ' : 'au ') + UNITS[u];
 
-// « Nouveau produit » : catalogue (conseillé) ou à la main.
+// « Nouveau produit » : catalogue (conseillé) ou à la main ; boutique de téléphones : « Nouveau téléphone ».
 function newProductChoice() {
   if (!catItems().length) return openSheet('new');
+  const phones = S.shop.type === 'telephones';
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Nouveau produit">
     <h2>Ajouter des produits</h2>
-    <button class="btn huge" id="np-cat" style="height:auto;padding:16px">📋 Choisir dans la liste<br><small style="font:400 13px var(--f-body);opacity:.85">produits courants déjà prêts, vous tapez seulement les prix</small></button>
+    ${phones ? `<button class="btn huge" id="np-phone" style="height:auto;padding:16px">📱 Nouveau téléphone<br><small style="font:400 13px var(--f-body);opacity:.85">marque, modèle, mémoire, couleur</small></button>` : ''}
+    <button class="btn ${phones ? 'ghost' : 'huge'}" id="np-cat" style="height:auto;padding:16px">📋 Choisir dans la liste<br><small style="font:400 13px var(--f-body);opacity:.85">produits courants déjà prêts, vous tapez seulement les prix</small></button>
     <button class="btn ghost" id="np-hand" style="padding:14px">✍️ Créer un produit à la main</button>
     <button class="btn ghost" id="cancel">Annuler</button></div></div>`;
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#np-cat').onclick = () => { closeSheet(); S.catMode = 'pick'; S.catPick = S.catPick || new Map(); window.scrollTo(0, 0); viewProducts(); };
   $('#np-hand').onclick = () => openSheet('new');
+  const nph = $('#np-phone'); if (nph) nph.onclick = () => phoneForm({});
+}
+
+// Téléphones : le commerçant écrit lui-même marque, modèle, mémoire et couleur (boutons rapides pour aller vite).
+// Le nom du produit est composé tout seul : « Tecno Spark 20 · 128 Go · Noir ».
+const PH_BRANDS = ['Samsung', 'Tecno', 'Itel', 'Infinix', 'iPhone', 'Xiaomi', 'Nokia', 'Huawei', 'Oppo'];
+const PH_MEM = ['32', '64', '128', '256', '512'];
+const PH_COLORS = ['Noir', 'Bleu', 'Blanc', 'Gris', 'Vert', 'Or', 'Violet'];
+const phoneName = v => [[v.brand, v.model].filter(Boolean).join(' '), v.mem ? v.mem + ' Go' : '', v.color].filter(Boolean).join(' · ');
+function phoneForm(v) {
+  v = { kind: 'Smartphones', brand: '', model: '', mem: '', color: '', sell: '', buy: '', qty: 1, ...v };
+  const chips = (key, list, suffix) => `<div class="chips" style="flex-wrap:wrap">${list.map(x => `<button type="button" data-ph="${key}" data-v="${esc(x)}" aria-pressed="${v[key] === x}">${esc(x)}${suffix || ''}</button>`).join('')}</div>`;
+  const big = 'style="font-size:18px;height:50px;font-weight:700"';
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Nouveau téléphone">
+    <h2>📱 Nouveau téléphone</h2>
+    <div class="modes" style="grid-template-columns:repeat(2,minmax(0,1fr))" role="radiogroup" aria-label="Type">
+      <button type="button" data-kind="Smartphones" aria-pressed="${v.kind === 'Smartphones'}"><span class="mi">📱</span>Tactile</button>
+      <button type="button" data-kind="Téléphones simples" aria-pressed="${v.kind === 'Téléphones simples'}"><span class="mi">☎️</span>Simple</button></div>
+    <label>Marque<input id="ph-brand" value="${esc(v.brand)}" maxlength="40" placeholder="ex. Tecno" ${big}></label>${chips('brand', PH_BRANDS)}
+    <label>Modèle<input id="ph-model" value="${esc(v.model)}" maxlength="40" placeholder="ex. Spark 20"></label>
+    <label>Mémoire (Go)<input id="ph-mem" value="${esc(v.mem)}" inputmode="numeric" maxlength="5" placeholder="${v.kind === 'Smartphones' ? 'ex. 128' : 'facultatif'}"></label>${chips('mem', PH_MEM, ' Go')}
+    <label>Couleur<input id="ph-color" value="${esc(v.color)}" maxlength="30" placeholder="ex. Noir"></label>${chips('color', PH_COLORS)}
+    <div class="metric" style="text-align:center"><span>Nom du produit</span><b id="ph-name" style="font-size:18px">${esc(phoneName(v) || '…')}</b></div>
+    <div class="row"><label>Prix de vente<input id="ph-sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.sell)}" ${big}></label>
+      <label>Prix d'achat (facultatif)<input id="ph-buy" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.buy)}" ${big}></label></div>
+    ${qtyField('f-qty', v.qty, 1, 'Combien en avez-vous ?')}
+    <button class="btn huge" type="submit">✓ Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
+  const read = () => { v.brand = $('#ph-brand').value.trim(); v.model = $('#ph-model').value.trim(); v.mem = $('#ph-mem').value.replace(/[^0-9]/g, '');
+    v.color = $('#ph-color').value.trim(); v.sell = $('#ph-sell').value; v.buy = $('#ph-buy').value; v.qty = $('#f-qty').value;
+    $('#ph-name').textContent = phoneName(v) || '…';
+    document.querySelectorAll('[data-ph]').forEach(b => b.setAttribute('aria-pressed', v[b.dataset.ph] === b.dataset.v)); };
+  $('#sheet').addEventListener('input', read);
+  document.querySelectorAll('[data-ph]').forEach(b => b.onclick = () => { $('#ph-' + b.dataset.ph).value = b.dataset.v; read(); });
+  document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { read(); v.kind = b.dataset.kind; phoneForm(v); });
+  document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { const i = $('#' + b.dataset.st); i.value = Math.max(0, (Number(i.value) || 0) + Number(b.dataset.d)); read(); });
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault(); read();
+    const name = phoneName(v), sell = Math.round(Number(v.sell)), buy = v.buy === '' ? null : Math.round(Number(v.buy)), q = Number(v.qty) || 0;
+    if (!v.brand && !v.model) return toast('Tapez au moins la marque ou le modèle.', true);
+    if (v.sell === '' || !(sell > 0)) return toast('Tapez le prix de vente.', true);
+    if (!(q >= 0) || q !== Math.trunc(q)) return toast('Quantité invalide (nombre entier).', true);
+    const btn = ev.target.querySelector('[type=submit]');
+    if (buy != null && sell < buy && !btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = 'Confirmer (vente à perte)'; return toast(`Attention : vente ${money(sell)} < achat ${money(buy)}.`, true); }
+    btn.disabled = true;
+    const { error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: name, p_category: v.kind, p_unit: 'piece',
+      p_buy_price: buy, p_sell_price: sell, p_initial_qty: q, p_alert: 0, p_barcode: null });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    await loadProducts(); S.summary = null;
+    $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Téléphone enregistré">
+      <h2>✅ Enregistré</h2><div class="metric" style="text-align:center"><b style="font-size:18px">${esc(name)}</b><span>${esc(money(sell))} · ${esc(String(q))} en stock</span></div>
+      <button class="btn" id="ph-again-color">🎨 Même modèle, autre couleur</button>
+      <button class="btn ghost" id="ph-again-mem">💾 Même modèle, autre mémoire</button>
+      <button class="btn ghost" id="ph-new">📱 Un autre téléphone</button>
+      <button class="btn ghost" id="ph-done">Terminé</button></div></div>`;
+    $('#ph-again-color').onclick = () => phoneForm({ ...v, color: '', qty: 1 });
+    $('#ph-again-mem').onclick = () => phoneForm({ ...v, mem: '', sell: '', buy: '', qty: 1 });
+    $('#ph-new').onclick = () => phoneForm({ kind: v.kind });
+    $('#ph-done').onclick = () => { closeSheet(); draw(); };
+  };
 }
 
 // Étape 1 : toucher les produits vendus dans la boutique.
