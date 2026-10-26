@@ -186,6 +186,29 @@ button.prod:hover{border-color:var(--accent)}
 .arow.bad{border-left-color:var(--bad)}
 .arow.warn{border-left-color:var(--warn)}
 .arow .aic{font-size:22px;line-height:1.2}
+
+/* Produits et clients simplifiés */
+.prow{display:flex;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 12px;text-align:left;width:100%;cursor:pointer}
+.prow .nm{font-weight:700;font-size:15.5px;overflow-wrap:anywhere}
+.prow .sub{font-size:13px;color:var(--muted)}
+.pic{flex:0 0 auto;border-radius:12px;display:flex;align-items:center;justify-content:center;font:800 18px var(--f-display)}
+.pic svg{width:72%;height:72%}
+.bigacts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.bigacts .btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:12px 8px;min-height:92px;justify-content:center;font-size:15px}
+.bigacts .btn span{font-size:24px}
+.bigacts .btn small{font-weight:400;font-size:11.5px;opacity:.8}
+details.more>summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:14px;list-style:none;padding:6px 0}
+details.more>summary::before{content:"＋ "}
+details.more[open]>summary::before{content:"− "}
+.avatar{flex:0 0 auto;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 17px var(--f-display)}
+.denom{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
+.bill{flex:0 0 auto;width:86px;height:42px;border-radius:9px;display:flex;align-items:center;justify-content:center;font:800 15px var(--f-display)}
+.coin{flex:0 0 auto;width:42px;height:42px;margin:0 22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:800 12.5px var(--f-display)}
+.denom .step{margin-left:auto}
+.denom .sum{min-width:78px;text-align:right;font-size:13px;color:var(--muted)}
+.sheet{grid-template-columns:minmax(0,1fr)}
+.sheet label{min-width:0}
+.step input{min-width:0}
 </style>
 
 </head>
@@ -229,7 +252,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26i';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26j';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1459,81 +1482,158 @@ async function submitSale() {
 }
 
 /* ===== Onglet Produits ===== */
+function prodIcon(p, size) {
+  const art = artFor(p.name), [bg, fg] = tileColor(p.category || p.name);
+  return art ? `<span class="pic" style="background:#F6F4EE;width:${size}px;height:${size}px" aria-hidden="true">${art}</span>`
+             : `<span class="pic" style="background:${bg};color:${fg};width:${size}px;height:${size}px" aria-hidden="true">${esc(initials(p.name))}</span>`;
+}
+const isLow = p => Number(p.stock_qty) <= Number(p.alert_threshold);
+const stockColor = p => Number(p.stock_qty) <= 0 ? 'var(--bad)' : isLow(p) ? 'var(--warn)' : 'var(--fg)';
+
 function viewProducts() {
+  const mgr = isManager(), low = S.products.filter(isLow).length;
+  if (!['all', 'low'].includes(S.pFilter)) S.pFilter = 'all';
   $('#view').innerHTML = `${S.countPending === 'submitted' && S.role === 'owner' ? '<div class="banner">Un comptage du gérant attend votre validation : touchez « Comptage ».</div>' : S.countPending === 'open' ? '<div class="banner">Un comptage est en cours : touchez « Comptage » pour le continuer.</div>' : ''}
-    <section class="card stack">
-      <div class="row"><h2 style="flex:1 1 auto">Produits (${S.products.length})</h2>
-        ${isManager() ? `<button class="btn ghost small" id="labels" style="flex:0 0 auto">Étiquettes</button><button class="btn ghost small" id="count" style="flex:0 0 auto" ${S.offline ? 'disabled' : ''}>Comptage</button><button class="btn small" id="newp" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau produit</button>` : ''}</div>
-      <div class="plist">${S.products.map(p => {
-        const low = Number(p.stock_qty) <= Number(p.alert_threshold);
-        return `<div class="prod">
-          <div style="min-width:0"><div class="nm">${esc(p.name)}</div>
-            <div class="sub">${esc(p.category)} · ${qty(p.stock_qty)} ${esc(UNITS[p.unit])} ${low ? '<span class="tag warn">Stock bas</span>' : ''}</div>
-            ${isManager() && p.barcode ? `<div class="sub">Code ${esc(p.barcode)}</div>` : ''}
-            ${isManager() && S.costs[p.id] != null ? `<div class="sub">Achat ${money(S.costs[p.id])}${Number(p.sell_price) < Number(S.costs[p.id]) ? ' <span class="tag bad">Vente à perte</span>' : Number(p.sell_price) === 0 ? ' <span class="tag bad">Prix de vente à 0</span>' : ''}</div>` : ''}
-            ${isManager() ? `<div class="seg" style="margin-top:6px"><button class="btn ghost small" data-edit="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Modifier</button><button class="btn ghost small" data-recv="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Réception</button><button class="btn ghost small" data-adj="${esc(p.id)}" ${canWrite() ? '' : 'disabled'}>Ajuster</button></div>` : ''}</div>
-          <div class="pr num">${money(p.sell_price)}</div></div>`;
-      }).join('') || '<p class="empty">Aucun produit.</p>'}</div>
-    </section>`;
+    ${mgr ? `<button class="btn huge" id="newp" ${canWrite() ? '' : 'disabled'}>＋ Nouveau produit</button>
+      <div class="row"><button class="btn ghost" id="count" ${S.offline ? 'disabled' : ''}>🔢 Comptage</button><button class="btn ghost" id="labels">🏷️ Étiquettes</button></div>` : ''}
+    <input id="pq" type="search" placeholder="🔍 Chercher un produit" value="${esc(S.pq || '')}" autocomplete="off" aria-label="Chercher un produit" style="height:50px;font-size:16px">
+    <div class="chips" role="group" aria-label="Filtre"><button aria-pressed="${S.pFilter === 'all'}" data-pf="all">Tous (${S.products.length})</button>
+      <button aria-pressed="${S.pFilter === 'low'}" data-pf="low">⚠️ À recommander (${low})</button></div>
+    <div class="plist" id="prod-list"></div>`;
+  const draw1 = () => {
+    const t = (S.pq || '').trim().toLowerCase();
+    const list = S.products.filter(p => (S.pFilter !== 'low' || isLow(p)) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t));
+    $('#prod-list').innerHTML = list.map(p => `<button class="prow" data-p="${esc(p.id)}">
+        ${prodIcon(p, 48)}
+        <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(p.name)}</span><br><span class="sub">${esc(money(p.sell_price))}</span></span>
+        <span style="text-align:right;flex:0 0 auto"><b class="num" style="font:800 22px var(--f-display);color:${stockColor(p)}">${esc(qty(p.stock_qty))}</b><br>
+          <span class="sub">${esc(UNITS[p.unit])}${Number(p.stock_qty) <= 0 ? ' · épuisé' : isLow(p) ? ' · bas' : ''}</span></span></button>`).join('')
+      || `<p class="empty">${S.pFilter === 'low' ? 'Aucun produit à recommander ✓' : 'Aucun produit.'}</p>`;
+    document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => productSheet(b.dataset.p));
+  };
+  draw1();
+  $('#pq').oninput = ev => { S.pq = ev.target.value; draw1(); };
+  document.querySelectorAll('[data-pf]').forEach(b => b.onclick = () => { S.pFilter = b.dataset.pf; viewProducts(); });
   const n = $('#newp'); if (n) n.onclick = () => openSheet('new');
   const lb = $('#labels'); if (lb) lb.onclick = openLabels;
   const ct = $('#count'); if (ct) ct.onclick = () => { S.tab = 'count'; draw(); };
-  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openSheet('edit', b.dataset.edit));
-  document.querySelectorAll('[data-recv]').forEach(b => b.onclick = () => openSheet('recv', b.dataset.recv));
-  document.querySelectorAll('[data-adj]').forEach(b => b.onclick = () => openSheet('adj', b.dataset.adj));
 }
+
+// Fiche d'un produit : grosses actions (arrivage, modifier, perte).
+function productSheet(pid) {
+  const p = S.products.find(x => x.id === pid); if (!p) return;
+  const mgr = isManager(), cost = S.costs[p.id];
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="${esc(p.name)}">
+    <div style="display:flex;gap:12px;align-items:center">${prodIcon(p, 64)}<div style="min-width:0"><h2>${esc(p.name)}</h2><div class="muted">${esc(p.category || '')}</div></div></div>
+    <div class="grid2">
+      <div class="metric"><span>En stock</span><b style="color:${stockColor(p)}">${esc(qty(p.stock_qty))} ${esc(UNITS[p.unit])}</b></div>
+      <div class="metric"><span>Prix de vente</span><b>${esc(money(p.sell_price))}</b></div>
+      ${mgr && cost != null ? `<div class="metric"><span>Prix d'achat</span><b>${esc(money(cost))}</b></div>
+        <div class="metric"><span>Gain par ${esc(UNITS[p.unit])}</span><b style="color:${p.sell_price - cost < 0 ? 'var(--bad)' : 'var(--accent)'}">${esc(money(p.sell_price - cost))}</b></div>` : ''}
+    </div>
+    ${isLow(p) ? `<div class="banner" style="margin:0">⚠️ Stock bas (alerte à ${esc(qty(p.alert_threshold))}) : pensez à recommander.</div>` : ''}
+    ${mgr ? `<div class="bigacts">
+      <button class="btn" id="pa-recv" ${canWrite() ? '' : 'disabled'}><span>📥</span>Arrivage<small>j'ai reçu de la marchandise</small></button>
+      <button class="btn ghost" id="pa-edit" ${canWrite() ? '' : 'disabled'}><span>✏️</span>Modifier<small>prix, nom…</small></button>
+      <button class="btn ghost" id="pa-adj" ${canWrite() ? '' : 'disabled'}><span>➖</span>Perte ou correction<small>cassé, volé, erreur…</small></button>
+      <button class="btn ghost" id="pa-sell"><span>🛒</span>Vendre<small>ajouter au panier</small></button></div>`
+      : '<button class="btn" id="pa-sell">🛒 Ajouter au panier</button>'}
+    ${mgr && p.barcode ? `<div class="muted" style="font-size:12.5px">Code ${esc(p.barcode)}</div>` : ''}
+    <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#pa-sell').onclick = () => { closeSheet(); if (Number(p.stock_qty) <= 0 && !S.offline) return toast('Stock épuisé : ' + p.name, true); addToCart(p.id); go('sale'); };
+  const r = $('#pa-recv'); if (r) r.onclick = () => openSheet('recv', pid);
+  const e = $('#pa-edit'); if (e) e.onclick = () => openSheet('edit', pid);
+  const a = $('#pa-adj'); if (a) a.onclick = () => openSheet('adj', pid);
+}
+
+// Champ quantité avec de gros boutons − et +.
+const qtyField = (id, val, step, label) => `<label>${label}<div class="step" style="gap:8px"><button type="button" data-st="${id}" data-d="-${step}" aria-label="moins">−</button>
+  <input id="${id}" type="number" inputmode="decimal" min="0" step="any" value="${esc(val)}" style="flex:1 1 auto;width:0;font-size:22px;height:50px" required>
+  <button type="button" data-st="${id}" data-d="${step}" aria-label="plus">+</button></div></label>`;
+const MORE = (inner, open) => `<details class="more"${open ? ' open' : ''}><summary>Plus de détails</summary><div class="stack" style="margin-top:10px">${inner}</div></details>`;
 
 function openSheet(kind, pid) {
   const p = pid ? S.products.find(x => x.id === pid) : null;
+  const cats = [...new Set(S.products.map(x => x.category).filter(Boolean))];
+  const unitChips = sel => `<div class="chips" style="flex-wrap:wrap" role="radiogroup" aria-label="Unité">${Object.entries(UNITS).map(([k, v]) => `<button type="button" role="radio" aria-pressed="${k === sel}" aria-checked="${k === sel}" data-unit="${k}">${v}</button>`).join('')}</div><input type="hidden" id="f-unit" value="${sel}">`;
+  const codeField = val => `<div class="row" style="align-items:flex-end;flex-wrap:nowrap">
+      <label style="flex:1 1 auto">Code-barres du fabricant (sinon un code est créé)<input id="f-code" maxlength="32" autocomplete="off" value="${esc(val || '')}"></label>
+      ${canScan() ? '<button class="btn ghost small" type="button" id="f-scan" style="flex:0 0 auto;margin-bottom:2px">📷</button>' : ''}</div>`;
+  const big = 'style="font-size:20px;height:52px;font-weight:700"';
   let title = '', body = '';
   if (kind === 'new') {
     title = 'Nouveau produit';
-    body = `<label>Nom<input id="f-name" maxlength="120" required></label>
-      <div class="row"><label>Catégorie<input id="f-cat" maxlength="60" placeholder="Divers"></label>
-        <label>Unité<select id="f-unit">${Object.entries(UNITS).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></label></div>
-      <div class="row"><label>Prix d'achat (FCFA)<input id="f-buy" type="number" inputmode="numeric" min="0" step="1" required></label>
-        <label>Prix de vente (FCFA)<input id="f-sell" type="number" inputmode="numeric" min="0" step="1" required></label></div>
-      <div class="row"><label>Quantité en stock<input id="f-qty" type="number" inputmode="decimal" min="0" step="any" value="0"></label>
-        <label>Alerte stock bas<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="0"></label></div>
-      <div class="row" style="align-items:flex-end;flex-wrap:nowrap">
-        <label style="flex:1 1 auto">Code-barres du fabricant (facultatif : sinon un code est créé automatiquement)<input id="f-code" maxlength="32" autocomplete="off"></label>
-        ${canScan() ? '<button class="btn ghost small" type="button" id="f-scan" style="flex:0 0 auto;margin-bottom:2px">📷</button>' : ''}</div>`;
+    body = `<label>Nom du produit<input id="f-name" maxlength="120" required placeholder="ex. Ciment 50 kg" ${big}></label>
+      <div class="muted" style="font-size:13px;font-weight:500">Vendu au (à la)</div>${unitChips('piece')}
+      <div class="row"><label>Prix de vente (FCFA)<input id="f-sell" type="number" inputmode="numeric" min="0" step="1" required ${big}></label>
+        <label>Prix d'achat (FCFA)<input id="f-buy" type="number" inputmode="numeric" min="0" step="1" required ${big}></label></div>
+      ${qtyField('f-qty', 0, 1, 'Combien en avez-vous maintenant ?')}
+      ${MORE(`<label>Catégorie (pour ranger)<input id="f-cat" maxlength="60" placeholder="Divers" list="cat-list"></label>
+        <label>Prévenir quand il reste moins de<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="0"></label>${codeField('')}`)}
+      <datalist id="cat-list">${cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist>`;
   } else if (kind === 'edit') {
     title = 'Modifier : ' + p.name;
-    body = `<label>Nom<input id="f-name" maxlength="120" required value="${esc(p.name)}"></label>
-      <label>Catégorie<input id="f-cat" maxlength="60" value="${esc(p.category)}"></label>
-      <div class="row"><label>Prix d'achat (FCFA)<input id="f-buy" type="number" inputmode="numeric" min="0" step="1" required value="${esc(S.costs[p.id] ?? '')}"></label>
-        <label>Prix de vente (FCFA)<input id="f-sell" type="number" inputmode="numeric" min="0" step="1" required value="${esc(p.sell_price)}"></label></div>
-      <label>Alerte stock bas<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="${esc(p.alert_threshold)}"></label>
-      <div class="row" style="align-items:flex-end;flex-wrap:nowrap">
-        <label style="flex:1 1 auto">Code-barres<input id="f-code" maxlength="32" autocomplete="off" value="${esc(p.barcode || '')}"></label>
-        ${canScan() ? '<button class="btn ghost small" type="button" id="f-scan" style="flex:0 0 auto;margin-bottom:2px">📷</button>' : ''}</div>
-      <p class="muted" style="margin:0;font-size:13px">Le nouveau prix s'applique aux prochaines ventes. Les ventes déjà faites gardent leur prix. Chaque changement de prix est noté dans le journal. Pour changer la quantité, utilisez « Réception » ou « Ajuster ».</p>
-      <div style="display:flex;align-items:center;gap:10px"><input id="f-off" type="checkbox" style="width:22px;height:22px;flex:0 0 auto;margin:0"><span style="font-size:14px" onclick="document.getElementById('f-off').click()">Retirer ce produit de la vente (il reste dans l'historique)</span></div>`;
+    body = `<div class="row"><label>Prix de vente (FCFA)<input id="f-sell" type="number" inputmode="numeric" min="0" step="1" required value="${esc(p.sell_price)}" ${big}></label>
+        <label>Prix d'achat (FCFA)<input id="f-buy" type="number" inputmode="numeric" min="0" step="1" required value="${esc(S.costs[p.id] ?? '')}" ${big}></label></div>
+      <label>Nom du produit<input id="f-name" maxlength="120" required value="${esc(p.name)}"></label>
+      ${MORE(`<label>Catégorie<input id="f-cat" maxlength="60" value="${esc(p.category)}" list="cat-list"></label>
+        <label>Prévenir quand il reste moins de<input id="f-alert" type="number" inputmode="decimal" min="0" step="any" value="${esc(p.alert_threshold)}"></label>${codeField(p.barcode)}
+        <div style="display:flex;align-items:center;gap:10px"><input id="f-off" type="checkbox" style="width:22px;height:22px;flex:0 0 auto;margin:0"><label for="f-off" style="font-size:14px;color:var(--fg);display:inline">Retirer ce produit de la vente (il reste dans l'historique)</label></div>`)}
+      <datalist id="cat-list">${cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+      <p class="muted" style="margin:0;font-size:12.5px">Le nouveau prix vaut pour les prochaines ventes. Pour la quantité : « Arrivage » ou « Perte ou correction ».</p>`;
   } else if (kind === 'recv') {
-    title = 'Réception : ' + p.name;
-    body = `<div class="row"><label>Quantité reçue<input id="f-qty" type="number" inputmode="decimal" min="0" step="any" required></label>
-      <label>Prix d'achat unitaire (FCFA)<input id="f-cost" type="number" inputmode="numeric" min="0" step="1" value="${esc(S.costs[p.id] ?? 0)}" required></label></div>
-      <div class="row"><label>Transport (FCFA)<input id="f-tr" type="number" inputmode="numeric" min="0" step="1" value="0"></label>
-        <label>Fournisseur<input id="f-sup" maxlength="100"></label></div>`;
+    title = '📥 Arrivage : ' + p.name;
+    body = `${qtyField('f-qty', '', 1, `Combien avez-vous reçu ? (${UNITS[p.unit]})`)}
+      <label>Prix d'achat de chaque ${esc(UNITS[p.unit])} (FCFA)<input id="f-cost" type="number" inputmode="numeric" min="0" step="1" value="${esc(S.costs[p.id] ?? 0)}" required ${big}></label>
+      ${MORE(`<label>Transport payé (FCFA)<input id="f-tr" type="number" inputmode="numeric" min="0" step="1" value="0"></label>
+        <label>Fournisseur<input id="f-sup" maxlength="100"></label>`)}
+      <div class="muted" id="recv-info" style="font-size:13.5px"></div>`;
   } else {
-    title = 'Ajuster le stock : ' + p.name;
-    body = `<label>Type<select id="f-kind"><option value="loss">Perte (retire du stock)</option><option value="return">Retour (ajoute au stock)</option><option value="correction">Correction d'inventaire (+ ou −)</option></select></label>
-      <label>Quantité<input id="f-qty" type="number" inputmode="decimal" step="any" required></label>
-      <label>Motif (obligatoire)<input id="f-reason" maxlength="200" required></label>`;
+    title = '➖ ' + p.name;
+    body = `<div class="modes" role="radiogroup" aria-label="Type">
+        <button type="button" data-k="loss" aria-pressed="true"><span class="mi">🗑️</span>Perte</button>
+        <button type="button" data-k="return" aria-pressed="false"><span class="mi">↩️</span>Retour</button>
+        <button type="button" data-k="correction" aria-pressed="false"><span class="mi">🔢</span>Correction</button></div>
+      <input type="hidden" id="f-kind" value="loss">
+      <div class="muted" id="adj-help" style="font-size:13px"></div>
+      ${qtyField('f-qty', '', 1, 'Quantité')}
+      <label>Pourquoi ?<input id="f-reason" maxlength="200" required placeholder="Touchez un choix ou écrivez"></label>
+      <div class="quick" id="why-chips"></div>`;
   }
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="${esc(title)}">
     <h2>${esc(title)}</h2>${body}
-    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+    <div class="row"><button class="btn huge" type="submit">✓ Enregistrer</button></div><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  document.querySelectorAll('[data-unit]').forEach(b => b.onclick = () => { $('#f-unit').value = b.dataset.unit;
+    document.querySelectorAll('[data-unit]').forEach(x => { x.setAttribute('aria-pressed', x === b); x.setAttribute('aria-checked', x === b); }); });
+  document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { const i = $('#' + b.dataset.st);
+    const v = Math.round(((Number(i.value) || 0) + Number(b.dataset.d)) * 1000) / 1000; i.value = kind === 'adj' && $('#f-kind').value === 'correction' ? v : Math.max(0, v); i.dispatchEvent(new Event('input', { bubbles: true })); });
+  if (kind === 'recv') {
+    const upd = () => { const q = Number($('#f-qty').value) || 0, c = Math.round(Number($('#f-cost').value) || 0);
+      $('#recv-info').innerHTML = q > 0 ? `Nouveau stock : <b>${esc(qty(Number(p.stock_qty) + q))} ${esc(UNITS[p.unit])}</b> · coût total ${esc(money(Math.round(q * c)))}` : ''; };
+    $('#sheet').addEventListener('input', upd); upd();
+  }
+  if (kind === 'adj') {
+    $('#f-qty').removeAttribute('min');
+    const WHY = { loss: ['Cassé', 'Abîmé', 'Périmé', 'Volé', 'Perdu'], return: ['Retour client', 'Erreur de vente'], correction: ['Comptage', 'Erreur de saisie'] };
+    const HELP = { loss: 'Retire du stock (marchandise perdue).', return: 'Remet dans le stock (le client a rapporté).', correction: 'Corrige le stock : nombre positif pour ajouter, négatif (avec −) pour retirer.' };
+    const setK = k => { $('#f-kind').value = k; document.querySelectorAll('[data-k]').forEach(x => x.setAttribute('aria-pressed', x.dataset.k === k));
+      $('#adj-help').textContent = HELP[k];
+      $('#why-chips').innerHTML = WHY[k].map(w => `<button type="button" data-why="${esc(w)}">${esc(w)}</button>`).join('');
+      document.querySelectorAll('[data-why]').forEach(x => x.onclick = () => { $('#f-reason').value = x.dataset.why; }); };
+    document.querySelectorAll('[data-k]').forEach(x => x.onclick = () => setK(x.dataset.k));
+    setK('loss');
+  }
   let lossOk = false;
   // Prix de vente sous le prix d'achat (ou à 0) : souvent une erreur de saisie. On avertit sans interdire.
   if (kind === 'new' || kind === 'edit') {
     $('#sheet').addEventListener('input', ev => {
       if (!lossOk || !['f-buy', 'f-sell'].includes(ev.target.id)) return;
       lossOk = false; const w = $('#loss-warn'); if (w) w.remove();
-      $('#sheet [type=submit]').textContent = 'Enregistrer';
+      $('#sheet [type=submit]').textContent = '✓ Enregistrer';
     });
   }
   $('#sheet').onsubmit = async ev => {
@@ -1554,7 +1654,7 @@ function openSheet(kind, pid) {
     let res;
     if (kind === 'new') {
       res = await sb.rpc('create_product', {
-        p_shop: S.shop.id, p_name: $('#f-name').value, p_category: $('#f-cat').value, p_unit: $('#f-unit').value,
+        p_shop: S.shop.id, p_name: $('#f-name').value, p_category: $('#f-cat').value || 'Divers', p_unit: $('#f-unit').value,
         p_buy_price: Math.round(num('f-buy')), p_sell_price: Math.round(num('f-sell')),
         p_initial_qty: num('f-qty'), p_alert: num('f-alert'), p_barcode: $('#f-code').value.trim() || null });
     } else if (kind === 'edit') {
@@ -1567,6 +1667,7 @@ function openSheet(kind, pid) {
         p_buy_price: buy, p_alert: num('f-alert'), p_active: $('#f-off').checked ? false : null,
         p_barcode: $('#f-code').value.trim() || null });
     } else if (kind === 'recv') {
+      if (!(num('f-qty') > 0)) { btn.disabled = false; return toast('Tapez la quantité reçue.', true); }
       res = await sb.rpc('receive_stock', {
         p_shop: S.shop.id, p_product: pid, p_qty: num('f-qty'), p_unit_cost: Math.round(num('f-cost')),
         p_transport: Math.round(num('f-tr')), p_supplier: $('#f-sup').value });
@@ -1575,7 +1676,7 @@ function openSheet(kind, pid) {
         p_shop: S.shop.id, p_product: pid, p_kind: $('#f-kind').value, p_qty: num('f-qty'), p_reason: $('#f-reason').value });
     }
     if (res.error) { btn.disabled = false; return toast(cleanErr(res.error), true); }
-    closeSheet(); toast('Enregistré.');
+    closeSheet(); toast('Enregistré ✓');
     await loadProducts(); S.summary = null; draw();
   };
   const fs = $('#f-scan');
@@ -1584,7 +1685,7 @@ function openSheet(kind, pid) {
     if (other && other.id !== pid) { toast('Ce code est déjà utilisé par : ' + other.name, true); return true; }
     $('#f-code').value = code; toast('Code lu : ' + code); return false;
   });
-  const first = $('#sheet input'); if (first) first.focus();
+  const first = $('#sheet input:not([type=hidden])'); if (first && kind !== 'adj') first.focus();
 }
 function closeSheet() { $('#sheet-host').innerHTML = ''; stopScan(); }
 
@@ -1822,8 +1923,8 @@ async function viewCash() {
   if (!S.cash.open) {
     $('#view').innerHTML = `<section class="card stack"><h2>Caisse fermée</h2>
       <p class="muted" style="margin:0">Le matin, comptez la monnaie de départ dans le tiroir, puis ouvrez la caisse.</p>
-      <label>Fonds de caisse (FCFA)<input id="cs-float" type="number" inputmode="numeric" min="0" step="5" value="${esc(S.cash.suggested_float || 0)}"></label>
-      <button class="btn" id="cs-open" ${canWrite() ? '' : 'disabled'}>Ouvrir la caisse</button></section>${hist}`;
+      <label>Monnaie dans le tiroir ce matin (FCFA)<input id="cs-float" type="number" inputmode="numeric" min="0" step="5" value="${esc(S.cash.suggested_float || 0)}" style="font-size:22px;height:56px;font-weight:700"></label>
+      <button class="btn huge" id="cs-open" ${canWrite() ? '' : 'disabled'}>🔓 Ouvrir la caisse</button></section>${hist}`;
     $('#cs-open').onclick = async () => {
       const v = Math.round(Number($('#cs-float').value));
       if (!(v >= 0)) return toast('Fonds de caisse invalide.', true);
@@ -1841,9 +1942,11 @@ async function viewCash() {
         ${cur.expenses_cash ? L('Dépenses payées en caisse', cur.expenses_cash, false, true) : ''}${cur.withdrawals ? L('Retraits', cur.withdrawals, false, true) : ''}
         <div class="total"><span>Attendu dans la caisse</span><span class="num">${money(cur.expected)}</span></div>
         ${L('Mobile Money (à vérifier sur le compte)', cur.mobile_money)}</div>` : ''}
-      <div class="row"><button class="btn ghost small" id="cs-exp" ${canWrite() ? '' : 'disabled'}>Dépense payée en caisse</button>
-        ${mgr ? `<button class="btn ghost small" id="cs-wd" ${canWrite() ? '' : 'disabled'}>Retrait</button><button class="btn ghost small" id="cs-dep" ${canWrite() ? '' : 'disabled'}>Dépôt</button>` : ''}</div>
-      <button class="btn" id="cs-close" ${canWrite() ? '' : 'disabled'}>Fermer la caisse (comptage du soir)</button></section>${hist}`;
+      <div class="bigacts">
+        <button class="btn ghost" id="cs-exp" ${canWrite() ? '' : 'disabled'}><span>🧾</span>Dépense<small>payée avec la caisse</small></button>
+        ${mgr ? `<button class="btn ghost" id="cs-wd" ${canWrite() ? '' : 'disabled'}><span>📤</span>Retrait<small>argent sorti</small></button>
+        <button class="btn ghost" id="cs-dep" ${canWrite() ? '' : 'disabled'}><span>📥</span>Dépôt<small>monnaie ajoutée</small></button>` : ''}</div>
+      <button class="btn huge" id="cs-close" ${canWrite() ? '' : 'disabled'}>🔒 Fermer la caisse (le soir)</button></section>${hist}`;
   $('#cs-exp').onclick = () => cashMoveSheet('expense');
   const wd = $('#cs-wd'); if (wd) wd.onclick = () => cashMoveSheet('withdrawal');
   const dp = $('#cs-dep'); if (dp) dp.onclick = () => cashMoveSheet('deposit');
@@ -1870,38 +1973,50 @@ function cashMoveSheet(kind) {
   };
 }
 
+// Couleurs proches des billets et pièces de franc CFA, pour les reconnaître d'un coup d'œil.
+const DENOM_LOOK = { 10000: ['#D9E7F7', '#1D4F91'], 5000: ['#F6E3D3', '#8A4B12'], 2000: ['#E5EED8', '#4D6B1F'], 1000: ['#EDE3F3', '#6941C6'],
+  500: ['#F0E2B6', '#7A5600'], 250: ['#E2E4E2', '#3F4A43'], 200: ['#F0E2B6', '#7A5600'], 100: ['#E2E4E2', '#3F4A43'], 50: ['#E2E4E2', '#3F4A43'], 25: ['#F0E2B6', '#7A5600'], 10: ['#F0E2B6', '#7A5600'], 5: ['#E2E4E2', '#3F4A43'] };
 function cashCloseSheet() {
+  const cnt = {};
+  const piece = d => { const [bg, fg] = DENOM_LOOK[d] || ['#eee', '#333'];          // billets en rectangle, pièces en rond
+    return `<span class="${d >= 1000 ? 'bill' : 'coin'}" style="background:${bg};color:${fg}">${plainMoney(d)}</span>`; };
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Fermer la caisse">
-    <h2>Fermer la caisse</h2>
-    <p class="muted" style="margin:0;font-size:13.5px">Comptez l'argent du tiroir. Tapez le nombre de billets et de pièces, ou seulement le total.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">${DENOMS.map(d => `<label style="font-size:13.5px">${plainMoney(d)}<input type="number" inputmode="numeric" min="0" step="1" data-dn="${d}" placeholder="0"></label>`).join('')}</div>
-    <label>Total compté (FCFA)<input id="c-total" type="number" inputmode="numeric" min="0" step="5" required></label>
-    <label>Remarque (facultatif)<input id="c-note" maxlength="300"></label>
-    <div class="row"><button class="btn" type="submit">Fermer la caisse</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+    <h2>💰 Compter l'argent</h2>
+    <p class="muted" style="margin:0;font-size:13.5px">Pour chaque billet et pièce, touchez + autant de fois que vous en avez.</p>
+    <div>${DENOMS.map(d => `<div class="denom">${piece(d)}
+      <div class="step"><button type="button" data-dm="${d}" aria-label="un billet de ${d} en moins">−</button>
+        <input type="number" inputmode="numeric" min="0" step="1" data-dn="${d}" placeholder="0" aria-label="Nombre de ${d}" style="width:58px">
+        <button type="button" data-dp="${d}" aria-label="un billet de ${d} en plus">+</button></div></div>`).join('')}</div>
+    <div class="metric" style="text-align:center"><span>Total compté</span><b id="c-show" style="font-size:30px">0 FCFA</b></div>
+    ${MORE(`<label>Ou tapez seulement le total (FCFA)<input id="c-total" type="number" inputmode="numeric" min="0" step="5"></label>
+      <label>Remarque (facultatif)<input id="c-note" maxlength="300"></label>`)}
+    <div class="banner" style="margin:0">Vous emportez l'argent du soir ? Faites d'abord un <b>Retrait</b>.</div>
+    <button class="btn huge" type="submit">🔒 Fermer la caisse</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   let byDenoms = false;
-  const sum = () => {
-    let t = 0, any = false;
-    document.querySelectorAll('[data-dn]').forEach(i => { const n = Math.round(Number(i.value) || 0); if (i.value !== '') any = true; t += n * Number(i.dataset.dn); });
-    byDenoms = any; if (any) $('#c-total').value = t;
-  };
-  document.querySelectorAll('[data-dn]').forEach(i => i.oninput = sum);
-  $('#c-total').oninput = () => { if (byDenoms) { document.querySelectorAll('[data-dn]').forEach(i => { i.value = ''; }); byDenoms = false; } };
+  const total = () => { const t = $('#c-total').value; return byDenoms || t === '' ? DENOMS.reduce((a, d) => a + (cnt[d] || 0) * d, 0) : Math.round(Number(t)); };
+  const show = () => { $('#c-show').textContent = money(total()); };
+  const setD = (d, n) => { cnt[d] = Math.max(0, Math.round(n) || 0); const i = document.querySelector(`[data-dn="${d}"]`); i.value = cnt[d] || '';
+    byDenoms = DENOMS.some(x => cnt[x]); if (byDenoms) $('#c-total').value = ''; show(); };
+  document.querySelectorAll('[data-dp]').forEach(b => b.onclick = () => setD(b.dataset.dp, (cnt[b.dataset.dp] || 0) + 1));
+  document.querySelectorAll('[data-dm]').forEach(b => b.onclick = () => setD(b.dataset.dm, (cnt[b.dataset.dm] || 0) - 1));
+  document.querySelectorAll('[data-dn]').forEach(i => i.oninput = () => setD(i.dataset.dn, Number(i.value)));
+  $('#c-total').oninput = () => { if ($('#c-total').value !== '') { DENOMS.forEach(d => { cnt[d] = 0; document.querySelector(`[data-dn="${d}"]`).value = ''; }); byDenoms = false; } show(); };
   $('#sheet').onsubmit = async ev => {
     ev.preventDefault();
     const btn = ev.target.querySelector('[type=submit]');
-    const total = Math.round(Number($('#c-total').value));
-    if (!(total >= 0)) return toast('Total invalide.', true);
-    if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Confirmer : ${plainMoney(total)} FCFA`; return; }
+    const t = total();
+    if (!(t >= 0)) return toast('Total invalide.', true);
+    if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = `Confirmer : ${plainMoney(t)} FCFA`; return; }
     btn.disabled = true;
     let denoms = null;
-    if (byDenoms) { denoms = {}; document.querySelectorAll('[data-dn]').forEach(i => { const n = Math.round(Number(i.value) || 0); if (n) denoms[i.dataset.dn] = n; }); }
-    const { data, error } = await sb.rpc('close_cash', { p_shop: S.shop.id, p_counted: total, p_denoms: denoms, p_note: $('#c-note').value || null });
-    if (error) { btn.disabled = false; btn.dataset.sure = ''; btn.textContent = 'Fermer la caisse'; return toast(cleanErr(error), true); }
+    if (byDenoms) { denoms = {}; DENOMS.forEach(d => { if (cnt[d]) denoms[d] = cnt[d]; }); }
+    const { data, error } = await sb.rpc('close_cash', { p_shop: S.shop.id, p_counted: t, p_denoms: denoms, p_note: $('#c-note').value || null });
+    if (error) { btn.disabled = false; btn.dataset.sure = ''; btn.textContent = '🔒 Fermer la caisse'; return toast(cleanErr(error), true); }
     closeSheet();
     if (data && data.gap !== undefined) {
-      toast(data.gap === 0 ? 'Caisse fermée : le compte est juste.' : `Caisse fermée. Écart : ${data.gap > 0 ? '+' : '−'} ${money(Math.abs(data.gap))} (attendu ${money(data.expected)}).`, data.gap < 0);
+      toast(data.gap === 0 ? 'Caisse fermée : le compte est juste ✓' : `Caisse fermée. Écart : ${data.gap > 0 ? '+' : '−'} ${money(Math.abs(data.gap))} (attendu ${money(data.expected)}).`, data.gap < 0);
     } else toast('Caisse fermée. Merci, le propriétaire verra le résultat.');
     await loadAlertCount(); draw();
   };
@@ -1959,6 +2074,11 @@ async function pickCustomer() {
   const nw = $('#pk-new'); if (nw) nw.onclick = () => customerForm(null, c => { S.custSel = { id: c.id, name: c.name, phone: c.phone, balance: c.balance }; drawCart(); });
 }
 
+// Pastille ronde avec les initiales : rouge s'il doit, verte s'il a une avance.
+function avatar(c, size) {
+  const [bg, fg] = c.balance > 0 ? ['var(--bad-soft)', 'var(--bad)'] : c.balance < 0 ? ['var(--accent-soft)', 'var(--accent)'] : ['var(--line)', 'var(--muted)'];
+  return `<span class="avatar" style="width:${size}px;height:${size}px;background:${bg};color:${fg}" aria-hidden="true">${esc(initials(c.name))}</span>`;
+}
 // Solde d'un client : positif = il doit (rouge) ; négatif = avance qu'on garde pour lui (vert).
 function balTag(b) {
   if (b > 0) return `<span class="pr" style="color:var(--bad)">doit ${money(b)}</span>`;
@@ -1972,18 +2092,18 @@ function customerForm(c, after) {
   const mgr = isManager();
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Client">
     <h2>${c ? 'Modifier le client' : 'Nouveau client'}</h2>
-    <label>Nom<input id="cu-name" maxlength="100" required value="${esc(c ? c.name : '')}"></label>
-    <label>Téléphone (obligatoire)<input id="cu-phone" type="tel" inputmode="tel" required placeholder="ex. 70 11 22 33" value="${esc(c ? c.phone || '' : '')}"></label>
-    <label>Remarque (facultatif)<input id="cu-note" maxlength="200" value="${esc(c ? c.note || '' : '')}"></label>
+    <label>Nom<input id="cu-name" maxlength="100" required value="${esc(c ? c.name : '')}" style="font-size:18px;height:52px"></label>
+    <label>Téléphone<input id="cu-phone" type="tel" inputmode="tel" required placeholder="ex. 70 11 22 33" value="${esc(c ? c.phone || '' : '')}" style="font-size:18px;height:52px"></label>
+    ${MORE(`<label>Remarque (facultatif)<input id="cu-note" maxlength="200" value="${esc(c ? c.note || '' : '')}" placeholder="ex. maçon, quartier…"></label>
     ${mgr ? `<label>Plafond de crédit en FCFA (vide = sans plafond)<input id="cu-limit" type="number" inputmode="numeric" min="0" step="500" value="${esc(c && c.credit_limit != null ? c.credit_limit : '')}"></label>` : ''}
-    ${c && mgr ? `<div style="display:flex;align-items:center;gap:10px"><input id="cu-off" type="checkbox" ${c.active === false ? 'checked' : ''} style="width:22px;height:22px;flex:0 0 auto;margin:0"><span style="font-size:14px">Client retiré (n'apparaît plus dans les choix)</span></div>` : ''}
-    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+    ${c && mgr ? `<div style="display:flex;align-items:center;gap:10px"><input id="cu-off" type="checkbox" ${c.active === false ? 'checked' : ''} style="width:22px;height:22px;flex:0 0 auto;margin:0"><label for="cu-off" style="font-size:14px;color:var(--fg);display:inline">Client retiré (n'apparaît plus dans les choix)</label></div>` : ''}`, !!(c && (c.note || c.credit_limit != null)))}
+    <button class="btn huge" type="submit">✓ Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#sheet').onsubmit = async ev => {
     ev.preventDefault();
     const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
-    const lim = mgr && $('#cu-limit').value !== '' ? Math.round(Number($('#cu-limit').value)) : null;
+    const lim = mgr && $('#cu-limit') && $('#cu-limit').value !== '' ? Math.round(Number($('#cu-limit').value)) : null;
     const res = c
       ? await sb.rpc('update_customer', { p_customer: c.id, p_name: $('#cu-name').value, p_phone: $('#cu-phone').value,
           p_note: $('#cu-note').value || null, p_limit: lim, p_active: !($('#cu-off') && $('#cu-off').checked) })
@@ -2005,18 +2125,19 @@ async function viewClients() {
   if (!['debt', 'adv', 'all'].includes(S.cFilter)) S.cFilter = 'debt';
   const F = [['debt', 'Ils doivent'], ['adv', 'Avances'], ['all', 'Tous']];
   $('#view').innerHTML = `<section class="card stack">
-      <div class="row"><h2 style="flex:1 1 auto">Clients</h2><button class="btn small" id="cl-new" style="flex:0 0 auto" ${canWrite() ? '' : 'disabled'}>Nouveau client</button></div>
+      <button class="btn huge" id="cl-new" ${canWrite() ? '' : 'disabled'}>＋ Nouveau client</button>
       <div class="grid2"><div class="metric"><span>Ils doivent</span><b style="color:${debt ? 'var(--bad)' : 'inherit'}">${money(debt)}</b></div>
         <div class="metric"><span>Avances gardées</span><b style="color:${held ? 'var(--accent)' : 'inherit'}">${money(held)}</b></div></div>
-      <input id="cl-q" type="search" placeholder="Nom ou téléphone" autocomplete="off">
-      <div class="seg">${F.map(([k, l]) => `<button class="btn small ${S.cFilter === k ? '' : 'ghost'}" data-cf="${k}">${l}</button>`).join('')}</div>
+      <input id="cl-q" type="search" placeholder="🔍 Nom ou téléphone" autocomplete="off" style="height:50px;font-size:16px">
+      <div class="chips" role="group" aria-label="Filtre">${F.map(([k, l]) => `<button aria-pressed="${S.cFilter === k}" data-cf="${k}">${l}</button>`).join('')}</div>
       <div class="plist" id="cl-list"></div></section>`;
   const draw1 = () => {
     const t = ($('#cl-q').value || '').trim().toLowerCase(), td = t.replace(/[^0-9]/g, '');
     const keep = c => S.cFilter === 'all' || (S.cFilter === 'debt' ? c.balance > 0 : c.balance < 0);
     const rows = list.filter(c => keep(c) && (!t || c.name.toLowerCase().includes(t) || (td && (c.phone || '').includes(td))));
-    $('#cl-list').innerHTML = rows.map(c => `<button class="prod" data-cl="${esc(c.id)}" style="${c.active === false ? 'opacity:.6' : ''}">
-      <span><span class="nm">${esc(c.name)}</span><br><span class="sub">${esc(c.phone || '⚠ téléphone manquant')}${c.credit_limit != null ? ' · plafond ' + money(c.credit_limit) : ''}</span></span>
+    $('#cl-list').innerHTML = rows.map(c => `<button class="prow" data-cl="${esc(c.id)}" style="${c.active === false ? 'opacity:.6' : ''}">
+      ${avatar(c, 46)}
+      <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(c.name)}</span><br><span class="sub">${esc(c.phone || '⚠ téléphone manquant')}</span></span>
       ${balTag(c.balance)}</button>`).join('')
       || `<p class="empty">${S.cFilter === 'debt' ? 'Personne ne doit d\'argent.' : S.cFilter === 'adv' ? 'Aucune avance.' : 'Aucun client.'}</p>`;
     document.querySelectorAll('[data-cl]').forEach(b => b.onclick = () => viewStatement(b.dataset.cl));
@@ -2035,23 +2156,29 @@ async function viewStatement(id) {
   // Ventes non payées comptant, dépôts et avances rendues, du plus récent au plus ancien.
   const ev = [
     ...st.sales.filter(s => s.paid < s.total)
-      .map(s => ({ at: s.created_at, html: `<div class="row" style="font-size:14px${s.status === 'cancelled' ? ';opacity:.55;text-decoration:line-through' : ''}"><span>${dt(s.created_at)} · Facture ${esc(invNo(s.invoice_no))}<br><span class="muted">total ${money(s.total)}, payé ${money(s.paid)}${s.advance_used ? ', sur l\'avance ' + money(s.advance_used) : ''}</span></span><b style="color:var(--bad)">+ ${money(s.total - s.paid)}</b></div>` })),
-    ...st.payments.map(p => ({ at: p.created_at, html: `<div class="row" style="font-size:14px${p.cancelled_at ? ';opacity:.55' : ''}"><span>${dt(p.created_at)} · ${p.kind === 'refund' ? 'avance rendue' : 'dépôt'} ${esc(PAY[p.method] || '')}${p.kind === 'refund' && p.note ? `<br><span class="muted">${esc(p.note)}</span>` : ''}${p.cancelled_at ? `<br><span class="muted">annulé : ${esc(p.cancel_reason || '')}</span>` : ''}</span>
+      .map(s => ({ at: s.created_at, html: `<div class="row" style="font-size:14px${s.status === 'cancelled' ? ';opacity:.55;text-decoration:line-through' : ''}"><span>🧾 ${dt(s.created_at)} · Facture ${esc(invNo(s.invoice_no))}<br><span class="muted">total ${money(s.total)}, payé ${money(s.paid)}${s.advance_used ? ', sur l\'avance ' + money(s.advance_used) : ''}</span></span><b style="color:var(--bad)">+ ${money(s.total - s.paid)}</b></div>` })),
+    ...st.payments.map(p => ({ at: p.created_at, html: `<div class="row" style="font-size:14px${p.cancelled_at ? ';opacity:.55' : ''}"><span>${p.kind === 'refund' ? '💸' : '💵'} ${dt(p.created_at)} · ${p.kind === 'refund' ? 'avance rendue' : 'argent reçu'} ${esc(PAY[p.method] || '')}${p.kind === 'refund' && p.note ? `<br><span class="muted">${esc(p.note)}</span>` : ''}${p.cancelled_at ? `<br><span class="muted">annulé : ${esc(p.cancel_reason || '')}</span>` : ''}</span>
       <span style="text-align:right"><b style="color:${p.kind === 'refund' ? 'var(--bad)' : 'var(--accent)'}">${p.kind === 'refund' ? '+' : '−'} ${money(p.amount)}</b>${mgr && !p.cancelled_at ? `<br><button class="btn ghost small" data-pc="${esc(p.id)}" data-pk="${esc(p.kind)}">Annuler</button>` : ''}</span></div>` }))
   ].sort((x, y) => y.at.localeCompare(x.at));
   const openQ = (st.quotes || []).filter(q => q.status === 'open');
-  $('#view').innerHTML = `<section class="card stack">
-      <h2>${esc(c.name)}</h2>
-      <div class="muted">${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : '⚠ téléphone manquant'}${c.credit_limit != null ? ' · plafond ' + money(c.credit_limit) : ''}${c.note ? ' · ' + esc(c.note) : ''}</div>
-      ${b < 0 ? `<div class="metric"><span>Avance disponible</span><b style="color:var(--accent)">${money(-b)}</b></div>`
-              : `<div class="metric"><span>Reste à payer</span><b style="color:${b > 0 ? 'var(--bad)' : 'inherit'}">${money(Math.max(0, b))}</b></div>`}
-      <div class="row"><button class="btn" id="st-pay" ${canWrite() ? '' : 'disabled'}>Dépôt d'argent</button>
-        ${b > 0 && c.phone ? '<button class="btn ghost" id="st-wa">Rappel WhatsApp</button>' : ''}
-        ${b < 0 && mgr ? `<button class="btn ghost" id="st-ref" ${canWrite() ? '' : 'disabled'}>Rendre l'avance</button>` : ''}</div>
-      ${openQ.length ? `<div class="stack" style="gap:6px">${openQ.map(q => `<button class="btn ghost small" data-sq="${esc(q.id)}">Devis ${esc(quoteNo(q.quote_no))} · ${money(q.total)} · jusqu'au ${dDay(q.valid_until)}</button>`).join('')}</div>` : ''}
-      ${mgr ? '<button class="btn ghost small" id="st-edit">Modifier le client</button>' : ''}
-      <button class="btn ghost" id="st-back">Retour aux clients</button></section>
-    <section class="card stack"><h3 style="margin:0">Crédits, dépôts et avances</h3>${ev.map(e => e.html).join('') || '<p class="muted" style="margin:0">Rien pour le moment.</p>'}</section>`;
+  $('#view').innerHTML = `<button class="btn ghost" id="st-back" style="justify-self:start">‹ Clients</button>
+    <section class="card stack">
+      <div style="display:flex;gap:12px;align-items:center">${avatar({ name: c.name, balance: b }, 56)}
+        <div style="min-width:0"><h2>${esc(c.name)}</h2><div class="muted">${c.phone ? esc(c.phone) : '⚠ téléphone manquant'}${c.note ? ' · ' + esc(c.note) : ''}</div></div></div>
+      <div style="text-align:center;padding:6px 0">
+        <div class="muted" style="font-size:13.5px">${b > 0 ? 'Il doit' : b < 0 ? 'Son avance' : 'Solde'}</div>
+        <div class="bigtotal" style="color:${b > 0 ? 'var(--bad)' : b < 0 ? 'var(--accent)' : 'inherit'}">${b ? esc(money(Math.abs(b))) : 'Rien ✓'}</div>
+        ${c.credit_limit != null ? `<div class="muted" style="font-size:12.5px">Plafond de crédit : ${esc(money(c.credit_limit))}</div>` : ''}</div>
+      <div class="bigacts">
+        <button class="btn" id="st-pay" ${canWrite() ? '' : 'disabled'}><span>💵</span>Il donne de l'argent<small>paiement ou avance</small></button>
+        ${c.phone ? `<a class="btn ghost" href="tel:${esc(c.phone)}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-decoration:none;min-height:92px"><span style="font-size:24px">📞</span>Appeler</a>` : ''}
+        ${b > 0 && c.phone ? '<button class="btn ghost" id="st-wa"><span>💬</span>Rappel WhatsApp<small>message prêt</small></button>' : ''}
+        ${b < 0 && mgr ? `<button class="btn ghost" id="st-ref" ${canWrite() ? '' : 'disabled'}><span>💸</span>Rendre l'avance<small>motif obligatoire</small></button>` : ''}
+        ${mgr ? '<button class="btn ghost" id="st-edit"><span>✏️</span>Modifier<small>nom, téléphone, plafond</small></button>' : ''}
+      </div>
+      ${openQ.length ? `<div class="stack" style="gap:6px">${openQ.map(q => `<button class="btn ghost small" data-sq="${esc(q.id)}">📄 Devis ${esc(quoteNo(q.quote_no))} · ${money(q.total)} · jusqu'au ${dDay(q.valid_until)}</button>`).join('')}</div>` : ''}
+    </section>
+    <section class="card stack"><h3 style="margin:0">Historique</h3>${ev.map(e => e.html).join('') || '<p class="muted" style="margin:0">Rien pour le moment.</p>'}</section>`;
   $('#st-back').onclick = viewClients;
   $('#st-pay').onclick = () => paymentForm(c, b);
   const rf = $('#st-ref'); if (rf) rf.onclick = () => refundForm(c, -b);
@@ -2083,16 +2210,21 @@ function paymentForm(c, balance) {
     <h2>Dépôt : ${esc(c.name)}</h2>
     <div class="muted">${balance > 0 ? 'Doit actuellement ' + money(balance) : balance < 0 ? 'Avance actuelle ' + money(-balance) : 'Ne doit rien'}</div>
     <p class="muted" style="margin:0;font-size:13px">L'argent paie d'abord la dette. Le reste est gardé comme avance pour ses prochains achats.</p>
-    <label>Montant reçu (FCFA)<input id="py-amt" type="number" inputmode="numeric" min="1" step="1" required value="${balance > 0 ? esc(balance) : ''}"></label>
-    <div class="muted" id="py-split" style="font-size:13.5px"></div>
-    <label>Paiement<select id="py-m">${Object.entries(PAY).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-    <label>Remarque (facultatif)<input id="py-note" maxlength="200" placeholder="ex. pour le chantier"></label>
-    <div class="row"><button class="btn" type="submit">Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></div></form></div>`;
+    <label>Combien il donne (FCFA)<input id="py-amt" type="number" inputmode="numeric" min="1" step="1" required value="${balance > 0 ? esc(balance) : ''}" style="font-size:22px;height:56px;font-weight:700"></label>
+    <div class="quick">${balance > 0 ? `<button type="button" data-pa="${balance}">Toute la dette</button>` : ''}${[5000, 10000, 25000, 50000].filter(v => v !== balance).slice(0, balance > 0 ? 2 : 3).map(v => `<button type="button" data-pa="${v}">${esc(fmtNum.format(v))}</button>`).join('')}</div>
+    <div id="py-split"></div>
+    <div class="modes" style="grid-template-columns:repeat(2,minmax(0,1fr))" role="radiogroup" aria-label="Paiement">
+      <button type="button" data-pm="cash" aria-pressed="true"><span class="mi">💵</span>Espèces</button><button type="button" data-pm="mobile_money" aria-pressed="false"><span class="mi">📱</span>Mobile</button></div>
+    <input type="hidden" id="py-m" value="cash">
+    ${MORE('<label>Remarque (facultatif)<input id="py-note" maxlength="200" placeholder="ex. pour le chantier"></label>')}
+    <button class="btn huge" type="submit">✓ Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
   const split = () => {
     const a = Math.round(Number($('#py-amt').value) || 0), d = Math.min(Math.max(balance, 0), a);
-    $('#py-split').textContent = a > 0 ? (d ? `Dette payée : ${money(d)}` : '') + (d && a - d ? ' · ' : '') + (a - d ? `Avance : ${money(a - d)}` : '') : '';
+    $('#py-split').innerHTML = a > 0 ? `<div class="banner ok" style="margin:0">${d ? `Paie sa dette : <b>${money(d)}</b>` : ''}${d && a - d ? '<br>' : ''}${a - d ? `Gardé en avance : <b>${money(a - d)}</b>` : ''}</div>` : '';
   };
   split(); $('#py-amt').oninput = split;
+  document.querySelectorAll('[data-pa]').forEach(b => b.onclick = () => { $('#py-amt').value = b.dataset.pa; split(); });
+  document.querySelectorAll('[data-pm]').forEach(b => b.onclick = () => { $('#py-m').value = b.dataset.pm; document.querySelectorAll('[data-pm]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#sheet').onsubmit = async ev => {
