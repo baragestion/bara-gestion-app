@@ -196,7 +196,7 @@ async function leave(msg) {
   try { await Promise.race([sb.auth.signOut({ scope: 'local' }), new Promise(r => setTimeout(r, 4000))]); } catch (e) {}
   try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch (e) {}
   Object.keys(mem).filter(k => k.startsWith('sb-')).forEach(k => delete mem[k]);
-  clearCache(); clearPin(); dropLock();
+  clearCache(); dropLock();
   S.user = null; S.kick = null; S.offline = false;
   drawLogin(msg || null);
 }
@@ -211,7 +211,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26e';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26f';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -601,21 +601,32 @@ function bindOfflineAdmin() {
    - 5 codes faux de suite : déconnexion complète (le mot de passe sera demandé). Les ventes
      hors ligne non envoyées restent dans le téléphone.
    - Code oublié : « Se reconnecter avec le mot de passe », puis on choisit un nouveau code.
+   - Chaque compte garde SON code sur ce téléphone, même après « Quitter » : en se reconnectant
+     avec le mot de passe, on retrouve son code et son empreinte. Le code n'est effacé qu'après
+     « code oublié » ou 5 codes faux.
    - Empreinte digitale : en option, si le propriétaire la permet. Elle passe par le lecteur du
      téléphone (WebAuthn) : l'empreinte elle-même ne quitte jamais le téléphone.
    Limite honnête : c'est un verrou d'écran contre une personne qui prend le téléphone ; il ne
    remplace pas le mot de passe ni les contrôles faits par la base. */
-const PIN_KEY = 'bg_pin_v1', PIN_ITER = 150000, PIN_MAX_FAILS = 5;
+const PIN_KEY = 'bg_pin_v2', PIN_ITER = 150000, PIN_MAX_FAILS = 5;
 const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const unb64 = str => Uint8Array.from(atob(str), c => c.charCodeAt(0));
-function pinRec() {
+// Un code par compte : { idDuCompte: { salt, hash, it, fails, bio } }.
+function pinAll() {
   try {
-    const r = JSON.parse(storage.getItem(PIN_KEY) || 'null');
-    return r && S.user && r.u === S.user.id && r.salt && r.hash ? r : null;
-  } catch (e) { return null; }
+    const m = JSON.parse(storage.getItem(PIN_KEY) || 'null');
+    if (m && typeof m === 'object' && !Array.isArray(m)) return m;
+    const old = JSON.parse(storage.getItem('bg_pin_v1') || 'null');      // ancienne version : un seul code
+    return old && old.u ? { [old.u]: old } : {};
+  } catch (e) { return {}; }
 }
-const savePinRec = r => storage.setItem(PIN_KEY, JSON.stringify(r));
-const clearPin = () => storage.removeItem(PIN_KEY);
+function pinRec() {
+  if (!S.user) return null;
+  const r = pinAll()[S.user.id];
+  return r && r.salt && r.hash ? { ...r, u: S.user.id } : null;
+}
+const savePinRec = r => { const m = pinAll(); m[r.u] = r; storage.setItem(PIN_KEY, JSON.stringify(m)); storage.removeItem('bg_pin_v1'); };
+const clearPin = () => { if (!S.user) return; const m = pinAll(); delete m[S.user.id]; storage.setItem(PIN_KEY, JSON.stringify(m)); storage.removeItem('bg_pin_v1'); };
 async function pinHash(pin, salt, iter) {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
   return b64(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: unb64(salt), iterations: iter }, key, 256));
@@ -815,7 +826,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 async function boot() {
   let session = null;
   try { session = (await sb.auth.getSession()).data.session; } catch (e) {}
-  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { clearCache(); clearPin(); dropLock(); S.user = null; const m = S.kick; S.kick = null; drawLogin(m); } });
+  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { clearCache(); dropLock(); S.user = null; const m = S.kick; S.kick = null; drawLogin(m); } });
   if (session) { S.user = session.user; await loadContext(); }
   else {
     // Pas de session lisible : sans réseau, on rouvre la copie locale si elle est valide et récente.
@@ -863,7 +874,9 @@ function drawLogin(msg) {
     const { data, error } = await sb.auth.signInWithPassword({ email: login, password: $('#password').value });
     if (error) return drawLogin(cleanErr(error));
     S.user = data.user;
-    clearPin(); S.unlocked = false;       // connexion par mot de passe : on choisit (ou rechoisit) son code
+    // Mot de passe juste : si ce compte a déjà son code sur ce téléphone, on le garde (pas besoin de le
+    // retaper tout de suite) ; sinon on le crée.
+    { const r = pinRec(); if (r) { r.fails = 0; savePinRec(r); } S.unlocked = !!r; }
     try { await sb.rpc('claim_single_session'); } catch (e) {}   // vendeurs et gérants : un seul appareil à la fois
     await loadContext();
   });
