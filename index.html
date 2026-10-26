@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26l';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26m';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -2518,28 +2518,32 @@ async function viewHistory() {
   }
   await ensureNames();   // propriétaire / gérant : noms des vendeurs (la base ne les leur donne qu'à eux)
   const waiting = myQueue();
-  $('#view').innerHTML = `${waiting.length ? `<section class="card stack"><h2>En attente d'envoi (${waiting.length})</h2>
-      ${waiting.map(r => `<div class="row" style="align-items:baseline"><b class="num">${money(r.total)}</b><span class="muted">${esc(r.offline_ref)}</span>
-        <span class="muted" style="text-align:right">${dt(r.created_at)}</span></div>${r.error ? `<div class="muted" style="color:var(--bad)">${esc(r.error)}</div>` : ''}`).join('')}
+  // Ventes rangées par jour, avec le total du jour.
+  const dayKey = x => new Date(x.created_at).toDateString();
+  const today = new Date().toDateString(), yest = new Date(Date.now() - 86400000).toDateString();
+  const days = [];
+  S.sales.forEach(x => { const k = dayKey(x); let d = days.find(y => y.k === k); if (!d) days.push(d = { k, at: x.created_at, list: [] }); d.list.push(x); });
+  const dayName = d => d.k === today ? 'Aujourd\'hui' : d.k === yest ? 'Hier' : new Date(d.at).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const what = x => { const it = x.sale_items || [], n = it.map(i => i.products?.name || '').filter(Boolean);
+    return n.length > 2 ? `${n.slice(0, 2).join(', ')} +${n.length - 2}` : n.join(', '); };
+  const row = x => { const cancelled = x.status === 'cancelled', rest = x.total - x.paid - (x.advance_used || 0);
+    const ic = cancelled ? '↩️' : rest > 0 ? '📒' : x.payment_method === 'mobile_money' ? '📱' : '💵';
+    return `<button class="prow" data-sale="${esc(x.id)}" style="${cancelled ? 'opacity:.55' : ''}">
+      <span style="font-size:24px;flex:0 0 auto" aria-hidden="true">${ic}</span>
+      <span style="min-width:0;flex:1 1 auto"><span class="nm" style="font-size:14.5px;font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.customer_name || what(x) || 'Vente')}</span>
+        <span class="sub">${new Date(x.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}${x.offline ? ' · hors ligne' : ''}${cancelled ? ' · <b style="color:var(--bad)">annulée</b>' : rest > 0 ? ` · <b style="color:var(--bad)">reste ${esc(fmtNum.format(rest))}</b>` : ''}</span></span>
+      <b class="num" style="flex:0 0 auto;font:800 17px var(--f-display);${cancelled ? 'text-decoration:line-through' : ''}">${esc(money(x.total))}</b></button>`; };
+  $('#view').innerHTML = `${waiting.length ? `<section class="card stack"><h2>⏳ En attente d'envoi (${waiting.length})</h2>
+      ${waiting.map(r => `<div class="row" style="align-items:baseline"><b class="num">${money(r.total)}</b><span class="muted" style="text-align:right">${dt(r.created_at)}</span></div>${r.error ? `<div class="muted" style="color:var(--bad)">${esc(r.error)}</div>` : ''}`).join('')}
       <button class="btn ghost small" id="sync-now">Envoyer maintenant</button></section>` : ''}
-    ${S.offline ? '' : histSeg()}<section class="stack"><h2>${isManager() ? 'Dernières ventes' : 'Mes dernières ventes'}</h2>
-    ${S.sales.map(s => `<article class="sale ${s.status === 'cancelled' ? 'cancelled' : ''}">
-      <div class="row" style="align-items:baseline"><b class="num">${money(s.total)}</b><span class="muted" style="flex:0 0 auto">${esc(invNo(s.invoice_no))}</span>
-        <span class="muted" style="text-align:right">${dt(s.created_at)} · ${esc(PAY[s.payment_method])}</span></div>
-      ${isManager() ? `<div class="muted">Vendu par ${esc((S.names && S.names[s.created_by]) || 'compte supprimé')}</div>` : ''}
-      ${s.discount > 0 ? `<div class="muted">Remise ${money(s.discount)} (prix normal ${money(s.total + s.discount)})</div>` : ''}
-      ${s.offline ? `<div class="muted"><span class="tag warn">Hors ligne</span> réf. ${esc(s.offline_ref)}${s.client_created_at ? ' · faite à ' + dt(s.client_created_at) : ' · heure du téléphone inconnue'}</div>` : ''}
-      <ul>${(s.sale_items || []).map(i => `<li>${qty(i.quantity)} ${esc(UNITS[i.products?.unit] || '')} ${esc(i.products?.name)} · ${money(i.line_total)}</li>`).join('')}</ul>
-      <div>${s.status === 'cancelled' ? `<span class="tag bad">Annulée</span> <span class="muted">${esc(s.cancel_reason)}</span>` : ''}
-        ${s.advance_used > 0 ? `<span class="tag">Sur l'avance : ${money(s.advance_used)}</span> ` : ''}
-        ${s.status !== 'cancelled' && s.paid + (s.advance_used || 0) < s.total ? `<span class="tag warn">Crédit : reste ${money(s.total - s.paid - (s.advance_used || 0))}</span>` : ''}
-        ${s.customer_name && (s.paid < s.total) ? ` <span class="muted">${esc(s.customer_name)}</span>` : ''}</div>
-      ${s.status !== 'cancelled' ? `<div class="seg"><button class="btn ghost small" data-inv="${esc(s.id)}">Facture</button>${isManager() ? `<button class="btn ghost small" data-cancel="${esc(s.id)}" ${canWrite() ? '' : 'disabled'}>Annuler cette vente</button>` : ''}</div>` : ''}
-    </article>`).join('') || '<p class="empty">Aucune vente pour le moment.</p>'}</section>`;
+    ${S.offline ? '' : histSeg()}
+    ${days.map(d => `<section class="stack" style="gap:8px"><div class="row" style="align-items:baseline;flex-wrap:nowrap"><h3 style="margin:0;flex:1 1 auto;text-transform:capitalize">${esc(dayName(d))}</h3>
+      <span class="muted num" style="flex:0 0 auto">${esc(money(d.list.filter(x => x.status !== 'cancelled').reduce((a, x) => a + x.total, 0)))}</span></div>
+      ${d.list.map(row).join('')}</section>`).join('') || '<p class="empty">Aucune vente pour le moment.</p>'}
+    <p class="muted" style="text-align:center;font-size:12.5px">Touchez une vente pour voir le détail, la facture ou l'annuler.</p>`;
   bindHistSeg();
   const sn = $('#sync-now'); if (sn) sn.onclick = async () => { await syncQueue(true); S.sales = null; viewHistory(); };
-  document.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => cancelDialog(b.dataset.cancel));
-  document.querySelectorAll('[data-inv]').forEach(b => b.onclick = () => openInvoice(S.sales.find(x => x.id === b.dataset.inv)));
+  document.querySelectorAll('[data-sale]').forEach(b => b.onclick = () => openInvoice(S.sales.find(x => x.id === b.dataset.sale), { fromHistory: true }));
 }
 
 function cancelDialog(id) {
@@ -3170,32 +3174,33 @@ async function shareInvoice(inv, phone) {
   toast('Message WhatsApp préparé. Pour envoyer le PDF, utilisez « Télécharger ».');
 }
 
-async function openInvoice(saleOrId) {
-  let inv;
-  try { inv = await buildInvoice(typeof saleOrId === 'string' ? await loadSale(saleOrId) : saleOrId); }
+async function openInvoice(saleOrId, opts = {}) {
+  let inv, sale;
+  try { sale = typeof saleOrId === 'string' ? await loadSale(saleOrId) : saleOrId; inv = await buildInvoice(sale); }
   catch (e) { return toast(e.message, true); }
   const incomplete = !inv.shop.phone && !inv.shop.address;
+  const cancelled = sale && sale.status === 'cancelled', rest = inv.total - inv.paid - inv.advance;
+  const chip = (t, c) => `<span class="tag ${c || ''}" style="font-size:12.5px;padding:4px 9px">${t}</span>`;
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Facture">
-    <h2>Facture ${esc(inv.num)}</h2>
-    <div class="card" style="display:grid;gap:4px">
-      <div><b>${esc(inv.shop.name)}</b></div>
-      ${inv.shop.address ? `<div class="muted">${esc(inv.shop.address)}</div>` : ''}${inv.shop.phone ? `<div class="muted">Tél. ${esc(inv.shop.phone)}</div>` : ''}
-      <div class="muted">${esc(dtFull(inv.date))}${inv.seller ? ' · ' + esc(inv.seller) : ''}</div>
-      ${inv.ref2 ? `<div class="muted">Réf. hors ligne : ${esc(inv.ref2)}</div>` : ''}
-      ${inv.customer ? `<div>Client : <b>${esc(inv.customer)}</b></div>` : ''}
-      <ul style="margin:6px 0 0;padding-left:18px">${inv.lines.map(l => `<li>${esc(plainQty(l.qty))} ${esc(l.unit)} ${esc(l.name)} · ${esc(money(l.total))}</li>`).join('')}</ul>
-      ${inv.discount > 0 ? `<div class="muted">Remise : − ${esc(money(inv.discount))}</div>` : ''}
-      <div class="total" style="margin-top:6px"><span>Total</span><span class="num">${esc(money(inv.total))}</span></div>
-      ${inv.advance > 0 ? `<div class="muted">Pris sur l'avance : ${esc(money(inv.advance))}</div>` : ''}
-      ${inv.paid + inv.advance < inv.total ? `<div style="color:var(--bad);font-weight:600">Reste à payer : ${esc(money(inv.total - inv.paid - inv.advance))}</div>` : ''}
-    </div>
-    ${incomplete && S.role === 'owner' ? `<div class="banner">Ajoutez l'adresse et le téléphone de la boutique (onglet Équipe, « Fiche de la boutique ») pour qu'ils apparaissent sur la facture.</div>` : ''}
-    <div class="row"><button class="btn" id="inv-share">Envoyer par WhatsApp</button><button class="btn ghost" id="inv-dl">Télécharger le PDF</button></div>
+    <div class="row" style="align-items:baseline;flex-wrap:nowrap"><h2 style="flex:1 1 auto">🧾 ${esc(inv.num)}</h2><span class="muted" style="flex:0 0 auto">${esc(dtFull(inv.date))}</span></div>
+    <div class="bigtotal" style="${cancelled ? 'text-decoration:line-through;opacity:.6' : ''}">${esc(money(inv.total))}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">
+      ${cancelled ? chip('Annulée', 'bad') : ''}${chip((sale && sale.payment_method === 'mobile_money' ? '📱 ' : '💵 ') + esc(inv.pay))}
+      ${inv.customer ? chip('👤 ' + esc(inv.customer)) : ''}${inv.advance > 0 ? chip('Avance : ' + esc(money(inv.advance))) : ''}
+      ${rest > 0 && !cancelled ? chip('Reste : ' + esc(money(rest)), 'bad') : ''}${inv.discount > 0 ? chip('Remise : ' + esc(money(inv.discount)), 'warn') : ''}</div>
+    <div class="card" style="padding:4px 12px">${inv.lines.map(l => `<div class="row" style="flex-wrap:nowrap;padding:7px 0;border-bottom:1px solid var(--line);font-size:14.5px">
+      <span style="flex:1 1 auto;min-width:0"><b>${esc(plainQty(l.qty))}</b> × ${esc(l.name)}</span><span class="num" style="flex:0 0 auto">${esc(money(l.total))}</span></div>`).join('')}</div>
+    ${inv.seller || inv.ref2 ? `<div class="muted" style="font-size:12.5px;text-align:center">${inv.seller ? 'Vendu par ' + esc(inv.seller) : ''}${inv.ref2 ? ' · réf. ' + esc(inv.ref2) : ''}</div>` : ''}
+    ${cancelled && sale.cancel_reason ? `<div class="banner bad" style="margin:0">Annulée : ${esc(sale.cancel_reason)}</div>` : ''}
+    ${incomplete && S.role === 'owner' ? `<div class="banner" style="margin:0">Ajoutez l'adresse et le téléphone de la boutique (Plus › Équipe, « Fiche de la boutique ») pour la facture.</div>` : ''}
+    ${cancelled ? '' : `<div class="row"><button class="btn" id="inv-share">💬 WhatsApp</button><button class="btn ghost" id="inv-dl">📄 PDF</button></div>`}
+    ${opts.fromHistory && !cancelled && isManager() && sale && sale.id ? `<button class="btn ghost" id="inv-cancel" ${canWrite() ? '' : 'disabled'} style="color:var(--bad)">Annuler cette vente</button>` : ''}
     <button class="btn ghost" id="inv-close">Fermer</button></div></div>`;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#inv-close').onclick = closeSheet;
-  $('#inv-dl').onclick = () => downloadInvoice(inv);
-  $('#inv-share').onclick = () => shareInvoice(inv);
+  const dl = $('#inv-dl'); if (dl) dl.onclick = () => downloadInvoice(inv);
+  const sh = $('#inv-share'); if (sh) sh.onclick = () => shareInvoice(inv);
+  const ca = $('#inv-cancel'); if (ca) ca.onclick = () => cancelDialog(sale.id);
 }
 
 /* ===== Fiche de la boutique (propriétaire) ===== */
