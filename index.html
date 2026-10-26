@@ -64,11 +64,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 .stack{display:grid;gap:12px}
 
 /* En-tête */
-.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:12px 8px;border-bottom:1px solid var(--line);margin-inline:-2px;padding-inline:2px}
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:8px 6px;border-bottom:1px solid var(--line);margin-inline:-2px;padding-inline:2px}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
 .top-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
-.shopname{font:700 19px/1.2 var(--f-display)}
-.who{font-size:12.5px;color:var(--muted)}
+.shopname{font:700 17px/1.2 var(--f-display);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.paying .tabs{display:none}
+.who{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .banner{margin-top:8px;border-radius:8px;padding:8px 11px;font-size:13.5px;background:var(--warn-soft);color:var(--warn)}
 .banner.bad{background:var(--bad-soft);color:var(--bad)}
 .banner.ok{background:var(--accent-soft);color:var(--accent)}
@@ -210,7 +211,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26d';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26e';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -779,8 +780,9 @@ async function bioEnroll() {
 // « Mon code » : verrouiller, changer le code, empreinte.
 async function myLockSheet() {
   const r = pinRec(), can = bioAllowed() && await bioAvailable();
-  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Code d'accès">
-    <h2>Code d'accès</h2>
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Mon compte">
+    <h2>Mon compte</h2>
+    <div class="muted">${esc(whoLine())} · ${esc(S.shop.name)}</div>
     <p class="muted" style="margin:0;font-size:13.5px">L'application se verrouille après ${lockLabel()} sans utilisation, et à chaque ouverture.</p>
     <button class="btn" id="lk-now">🔒 Verrouiller maintenant</button>
     <button class="btn ghost" id="lk-change">Changer mon code</button>
@@ -789,9 +791,11 @@ async function myLockSheet() {
       : r && r.bio ? '<button class="btn ghost" id="lk-bio-off">Ne plus utiliser l\'empreinte</button>'
       : `<div class="banner">Attention : <b>toutes</b> les empreintes enregistrées dans ce téléphone pourront ouvrir l'application (par exemple celles de votre famille). N'activez que si vous êtes seul à avoir mis vos empreintes dans ce téléphone.</div>
          <button class="btn ghost" id="lk-bio-on">Activer l'empreinte</button>`}
+    <button class="btn ghost" id="lk-quit">Quitter (se déconnecter)</button>
     <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#lk-quit').onclick = () => { closeSheet(); askLeave(); };
   $('#lk-now').onclick = () => { closeSheet(); lock(); };
   $('#lk-change').onclick = () => { closeSheet(); pinSetup(true); };
   const on = $('#lk-bio-on'); if (on) on.onclick = async () => { await bioEnroll(); myLockSheet(); };
@@ -988,22 +992,21 @@ function draw() {
   $('#app').innerHTML = `
     <header class="top">
       <div class="top-row">
-        <div style="min-width:0">
-          ${multi ? `<select id="shop-pick" aria-label="Boutique">${S.memberships.map(m => `<option value="${esc(m.shop_id)}" ${m.shop_id===S.shop.id?'selected':''}>${esc(m.shops.name)}</option>`).join('')}</select>`
+        <div style="min-width:0;flex:1 1 auto">
+          ${multi ? `<select id="shop-pick" aria-label="Boutique" style="padding:6px 8px">${S.memberships.map(m => `<option value="${esc(m.shop_id)}" ${m.shop_id===S.shop.id?'selected':''}>${esc(m.shops.name)}</option>`).join('')}</select>`
                   : `<div class="shopname">${esc(S.shop.name)}</div>`}
-          <div class="who">${esc(S.shop.who)} · ${esc(ROLES[S.role])}</div>
+          <div class="who">${esc(whoLine())}</div>
         </div>
-        <div style="display:flex;gap:6px;flex:0 0 auto"><button class="btn ghost small" id="lockb" aria-label="Code d'accès et verrouillage">🔒</button>
-        <button class="btn ghost small" id="logout">Quitter</button></div>
+        <button class="btn ghost small" id="lockb" aria-label="Mon compte : verrouiller, code, quitter" style="flex:0 0 auto;font-size:18px;padding:6px 12px">👤</button>
       </div>
       ${banner()}
     </header>
     <main id="view"></main>
     <nav class="tabs${tabs.length > 5 ? ' many' : ''}" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k || (S.tab==='count' && k==='products')?'aria-current="page"':''}><span class="ic" aria-hidden="true">${TAB_IC[k] || ''}</span><span>${l}</span></button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
-  $('#logout').onclick = askLeave;
   $('#lockb').onclick = myLockSheet;
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
+  document.body.classList.remove('paying');
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { stopScan(); S.tab = b.dataset.tab; draw(); });
   ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash, clients: viewClients })[S.tab]();
 }
@@ -1017,7 +1020,7 @@ function cartTotal() {
 
 function viewSale() {
   if (S.payOpen && S.cart.size) return viewPay();
-  S.payOpen = false;
+  S.payOpen = false; document.body.classList.remove('paying');
   const cats = [...new Set(S.products.map(p => p.category).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'fr'));
   if (S.cat && !cats.includes(S.cat)) S.cat = '';
   $('#view').innerHTML = `${!S.offline && S.cash && !S.cash.open ? '<div class="banner">Caisse non ouverte. <button class="btn small" id="go-cash" style="margin-left:6px">Ouvrir la caisse</button></div>' : ''}
@@ -1050,6 +1053,37 @@ function viewSale() {
   drawProducts(); drawCart();
 }
 
+// Nom et rôle sans répétition (« Gérant · Gérant » devient « Gérant »).
+function whoLine() {
+  const n = String(S.shop.who || ''), r = ROLES[S.role] || '';
+  const norm = x => x.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  return norm(n) === norm(r) || !n ? r : `${n} · ${r}`;
+}
+
+// Dessins des produits courants (faits pour Bara Gestion, sans droits d'auteur). Le nom du produit
+// choisit le dessin ; sinon, les initiales en couleur.
+const ART = [
+  [/ciment/i, '<path d="M14 14q18-6 36 0l4 38q-22 6-44 0Z" fill="#C9C2B3" stroke="#6B6352" stroke-width="2.5" stroke-linejoin="round"/><rect x="19" y="28" width="26" height="12" rx="2" fill="#1f6b4a"/><path d="M22 34h20" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>'],
+  [/\bfers?\b|b[ée]ton arm|tor\b/i, '<g stroke="#7A4A2A" stroke-width="4.5" stroke-linecap="round"><path d="M10 50 54 12"/><path d="M12 58 58 18" opacity=".7"/></g><g stroke="#C08A5E" stroke-width="1.6"><path d="M20 38l3 3M28 31l3 3M36 24l3 3M44 17l3 3"/></g>'],
+  [/t[ôo]le/i, '<path d="M6 20l52-6v34L6 54Z" fill="#B8C4CC" stroke="#4E5D68" stroke-width="2.5" stroke-linejoin="round"/><g stroke="#4E5D68" stroke-width="2"><path d="M15 19v34M24 18v34M33 17v34M42 16v34M51 15v34"/></g>'],
+  [/clou|pointe/i, '<g stroke="#55606A" stroke-width="3.2" stroke-linecap="round"><path d="M18 14v38M32 10v42M46 16v36"/><path d="M12 14h12M26 10h12M40 16h12" stroke-width="4"/></g>'],
+  [/peinture|vernis|soma\s*fix|colle/i, '<path d="M14 20h36v32a4 4 0 0 1-4 4H18a4 4 0 0 1-4-4Z" fill="#E7E2D6" stroke="#5B544A" stroke-width="2.5"/><ellipse cx="32" cy="20" rx="18" ry="5" fill="#2F5DA8" stroke="#5B544A" stroke-width="2.5"/><rect x="14" y="30" width="36" height="12" fill="#2F5DA8"/><path d="M20 20q12-16 24 0" fill="none" stroke="#5B544A" stroke-width="2.5"/>'],
+  [/sable|gravier|graviers|gravillon/i, '<path d="M6 52q26-44 52 0Z" fill="#E3C27A" stroke="#9A7A2E" stroke-width="2.5" stroke-linejoin="round"/><g fill="#9A7A2E"><circle cx="24" cy="42" r="1.6"/><circle cx="34" cy="34" r="1.6"/><circle cx="40" cy="44" r="1.6"/><circle cx="30" cy="46" r="1.6"/></g>'],
+  [/brouette/i, '<path d="M8 22h38l-6 16H16Z" fill="#1f6b4a" stroke="#123F2C" stroke-width="2.5" stroke-linejoin="round"/><path d="M46 22l12-6" stroke="#123F2C" stroke-width="3" stroke-linecap="round"/><path d="M18 38l-4 12M38 38l4 12" stroke="#123F2C" stroke-width="2.5"/><circle cx="28" cy="48" r="6" fill="#333"/>'],
+  [/pelle|pioche|daba/i, '<path d="M32 6v30" stroke="#8A5A2B" stroke-width="4" stroke-linecap="round"/><path d="M24 6h16" stroke="#8A5A2B" stroke-width="4" stroke-linecap="round"/><path d="M22 36h20v8q0 12-10 14-10-2-10-14Z" fill="#9AA5AE" stroke="#4E5D68" stroke-width="2.5" stroke-linejoin="round"/>'],
+  [/fil\b|c[âa]ble|fil d.attache/i, '<circle cx="32" cy="32" r="20" fill="none" stroke="#B4541C" stroke-width="5"/><circle cx="32" cy="32" r="11" fill="none" stroke="#B4541C" stroke-width="5"/><path d="M52 32h8" stroke="#B4541C" stroke-width="5" stroke-linecap="round"/>'],
+  [/tuyau|pvc|tube/i, '<rect x="8" y="24" width="48" height="16" rx="3" fill="#D9DEE2" stroke="#5E6A73" stroke-width="2.5"/><ellipse cx="56" cy="32" rx="4" ry="8" fill="#fff" stroke="#5E6A73" stroke-width="2.5"/>'],
+  [/robinet/i, '<path d="M14 26h24v10H14Z" fill="#9AA5AE" stroke="#4E5D68" stroke-width="2.5"/><path d="M38 28h8q6 0 6 6v10h-8v-8h-6" fill="#9AA5AE" stroke="#4E5D68" stroke-width="2.5" stroke-linejoin="round"/><path d="M24 26v-8M18 18h12" stroke="#4E5D68" stroke-width="3" stroke-linecap="round"/><path d="M48 50v4" stroke="#2F5DA8" stroke-width="3" stroke-linecap="round"/>'],
+  [/ampoule|lampe/i, '<path d="M32 8a16 16 0 0 0-9 29v7h18v-7A16 16 0 0 0 32 8Z" fill="#FCE58A" stroke="#8A6100" stroke-width="2.5"/><path d="M24 48h16M26 54h12" stroke="#5E6A73" stroke-width="3" stroke-linecap="round"/>'],
+  [/cadenas|serrure/i, '<rect x="14" y="28" width="36" height="26" rx="4" fill="#E0B44A" stroke="#7A5600" stroke-width="2.5"/><path d="M22 28v-8a10 10 0 0 1 20 0v8" fill="none" stroke="#5E6A73" stroke-width="4"/><circle cx="32" cy="40" r="3" fill="#7A5600"/>'],
+  [/riz|ma[ïi]s|mil|farine|sucre|haricot|sac\b/i, '<path d="M16 16h32l4 38H12Z" fill="#F1E7CF" stroke="#8A7A55" stroke-width="2.5" stroke-linejoin="round"/><path d="M16 16q16 6 32 0" fill="none" stroke="#8A7A55" stroke-width="2.5"/><circle cx="32" cy="36" r="7" fill="#C0392B"/>'],
+  [/huile/i, '<path d="M26 8h12v8l6 8v30a4 4 0 0 1-4 4H24a4 4 0 0 1-4-4V24l6-8Z" fill="#F7D35C" stroke="#8A6100" stroke-width="2.5" stroke-linejoin="round"/><rect x="22" y="32" width="20" height="12" fill="#1f6b4a"/>'],
+  [/savon|lessive|omo/i, '<rect x="10" y="22" width="44" height="24" rx="10" fill="#BFE3F2" stroke="#2F6E8A" stroke-width="2.5"/><circle cx="48" cy="16" r="4" fill="none" stroke="#2F6E8A" stroke-width="2"/><circle cx="40" cy="12" r="2.5" fill="none" stroke="#2F6E8A" stroke-width="2"/>'],
+  [/pagne|tissu|chemise|t-?shirt|robe|pantalon|habit/i, '<path d="M22 10l-12 8 6 10 6-4v30h20V24l6 4 6-10-12-8q-4 6-10 6t-10-6Z" fill="#7FB2E5" stroke="#2F5DA8" stroke-width="2.5" stroke-linejoin="round"/>'],
+  [/chaussure|sandale|basket/i, '<path d="M8 40q2-14 14-14l8 8q10 4 22 4 6 0 6 6v4H8Z" fill="#8A5A2B" stroke="#4E3418" stroke-width="2.5" stroke-linejoin="round"/>'],
+];
+function artFor(name) { const a = ART.find(([re]) => re.test(name || '')); return a ? `<svg viewBox="0 0 64 64" width="46" height="46" aria-hidden="true">${a[1]}</svg>` : ''; }
+
 // Couleur et lettres de la tuile : même couleur pour une même catégorie.
 const TILE_COLORS = [['#E3F1E8', '#1f6b4a'], ['#E8EEF8', '#2F5DA8'], ['#FBF1D6', '#8A6100'], ['#F7E6E3', '#B42318'], ['#EEE8F6', '#6941C6'], ['#E2F2F4', '#0E6874'], ['#F6E8DA', '#8A4B12']];
 function tileColor(key) {
@@ -1065,7 +1099,7 @@ function drawProducts() {
   $('#plist').innerHTML = list.length ? list.map(p => {
     const [bg, fg] = tileColor(p.category || p.name), inCart = S.cart.get(p.id), out = Number(p.stock_qty) <= 0;
     return `<button class="tile${inCart ? ' in' : ''}" data-add="${esc(p.id)}" ${out && !S.offline ? 'disabled' : ''} aria-label="${esc(p.name)}, ${esc(money(p.sell_price))}${inCart ? ', ' + esc(qty(inCart)) + ' dans le panier' : ''}">
-      <span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>
+      ${artFor(p.name) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(p.name)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>`}
       <span class="tn">${esc(p.name)}</span>
       ${out ? '<span class="ts">Épuisé</span>' : `<span class="tp">${esc(fmtNum.format(p.sell_price))}</span>`}
       ${inCart ? `<span class="tq" aria-hidden="true">${esc(qty(inCart))}</span>` : ''}</button>`;
@@ -1144,7 +1178,7 @@ function drawCart() {
 
 // Écran Payer : lignes du panier, client, mode de paiement, monnaie à rendre, Valider.
 function viewPay() {
-  S.payOpen = true;
+  S.payOpen = true; document.body.classList.add('paying');
   const bar = document.getElementById('cartbar'); if (bar) bar.remove();
   const f = payFigures(), canDisc = S.role === 'owner' || (S.shop.discMax || 0) > 0, eq = S.editQuote;
   const lines = [...S.cart].map(([id, q]) => {
