@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26m';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26o';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1210,10 +1210,15 @@ function whoLine() {
 // Dessins des produits courants (faits pour Bara Gestion, sans droits d'auteur). Le nom du produit
 // choisit le dessin ; sinon, les initiales en couleur.
 const ART = [
+  [/t[ée]l[ée]phone|smartphone/i, '<rect x="20" y="6" width="24" height="52" rx="5" fill="#3B4A57" stroke="#1E2A33" stroke-width="2.5"/><rect x="24" y="12" width="16" height="36" rx="1.5" fill="#9FD3F0"/><circle cx="32" cy="53" r="2" fill="#9AA5AE"/>'],
+  [/pneu|chambre [àa] air|rustine/i, '<circle cx="32" cy="32" r="24" fill="#2E2E2E"/><circle cx="32" cy="32" r="12" fill="#F6F4EE" stroke="#9AA5AE" stroke-width="3"/><g stroke="#555" stroke-width="2"><path d="M32 8v6M32 50v6M8 32h6M50 32h6M15 15l4 4M45 45l4 4M49 15l-4 4M19 45l-4 4"/></g>'],
+  [/cha[îi]ne/i, '<g fill="none" stroke="#5E6A73" stroke-width="4"><rect x="6" y="24" width="20" height="14" rx="7"/><rect x="22" y="24" width="20" height="14" rx="7"/><rect x="38" y="24" width="20" height="14" rx="7"/></g>'],
+  [/cr[èe]me|lait de corps|pommade|vaseline|karit[ée]|parfum|d[ée]odorant|shampo|d[ée]frisant|gel coiffant|dentifrice/i, '<rect x="22" y="8" width="20" height="10" rx="2" fill="#E8A3B8" stroke="#8A3B55" stroke-width="2.5"/><path d="M18 18h28v34a4 4 0 0 1-4 4H22a4 4 0 0 1-4-4Z" fill="#FBE3EA" stroke="#8A3B55" stroke-width="2.5"/><rect x="22" y="30" width="20" height="10" rx="2" fill="#E8A3B8"/>'],
+
   [/ciment/i, '<path d="M14 14q18-6 36 0l4 38q-22 6-44 0Z" fill="#C9C2B3" stroke="#6B6352" stroke-width="2.5" stroke-linejoin="round"/><rect x="19" y="28" width="26" height="12" rx="2" fill="#1f6b4a"/><path d="M22 34h20" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>'],
   [/\bfers?\b|b[ée]ton arm|tor\b/i, '<g stroke="#7A4A2A" stroke-width="4.5" stroke-linecap="round"><path d="M10 50 54 12"/><path d="M12 58 58 18" opacity=".7"/></g><g stroke="#C08A5E" stroke-width="1.6"><path d="M20 38l3 3M28 31l3 3M36 24l3 3M44 17l3 3"/></g>'],
-  [/t[ôo]le/i, '<path d="M6 20l52-6v34L6 54Z" fill="#B8C4CC" stroke="#4E5D68" stroke-width="2.5" stroke-linejoin="round"/><g stroke="#4E5D68" stroke-width="2"><path d="M15 19v34M24 18v34M33 17v34M42 16v34M51 15v34"/></g>'],
   [/clou|pointe/i, '<g stroke="#55606A" stroke-width="3.2" stroke-linecap="round"><path d="M18 14v38M32 10v42M46 16v36"/><path d="M12 14h12M26 10h12M40 16h12" stroke-width="4"/></g>'],
+  [/t[ôo]le/i, '<path d="M6 20l52-6v34L6 54Z" fill="#B8C4CC" stroke="#4E5D68" stroke-width="2.5" stroke-linejoin="round"/><g stroke="#4E5D68" stroke-width="2"><path d="M15 19v34M24 18v34M33 17v34M42 16v34M51 15v34"/></g>'],
   [/peinture|vernis|soma\s*fix|colle/i, '<path d="M14 20h36v32a4 4 0 0 1-4 4H18a4 4 0 0 1-4-4Z" fill="#E7E2D6" stroke="#5B544A" stroke-width="2.5"/><ellipse cx="32" cy="20" rx="18" ry="5" fill="#2F5DA8" stroke="#5B544A" stroke-width="2.5"/><rect x="14" y="30" width="36" height="12" fill="#2F5DA8"/><path d="M20 20q12-16 24 0" fill="none" stroke="#5B544A" stroke-width="2.5"/>'],
   [/sable|gravier|graviers|gravillon/i, '<path d="M6 52q26-44 52 0Z" fill="#E3C27A" stroke="#9A7A2E" stroke-width="2.5" stroke-linejoin="round"/><g fill="#9A7A2E"><circle cx="24" cy="42" r="1.6"/><circle cx="34" cy="34" r="1.6"/><circle cx="40" cy="44" r="1.6"/><circle cx="30" cy="46" r="1.6"/></g>'],
   [/brouette/i, '<path d="M8 22h38l-6 16H16Z" fill="#1f6b4a" stroke="#123F2C" stroke-width="2.5" stroke-linejoin="round"/><path d="M46 22l12-6" stroke="#123F2C" stroke-width="3" stroke-linecap="round"/><path d="M18 38l-4 12M38 38l4 12" stroke="#123F2C" stroke-width="2.5"/><circle cx="28" cy="48" r="6" fill="#333"/>'],
@@ -1223,7 +1228,7 @@ const ART = [
   [/robinet/i, '<path d="M14 26h24v10H14Z" fill="#9AA5AE" stroke="#4E5D68" stroke-width="2.5"/><path d="M38 28h8q6 0 6 6v10h-8v-8h-6" fill="#9AA5AE" stroke="#4E5D68" stroke-width="2.5" stroke-linejoin="round"/><path d="M24 26v-8M18 18h12" stroke="#4E5D68" stroke-width="3" stroke-linecap="round"/><path d="M48 50v4" stroke="#2F5DA8" stroke-width="3" stroke-linecap="round"/>'],
   [/ampoule|lampe/i, '<path d="M32 8a16 16 0 0 0-9 29v7h18v-7A16 16 0 0 0 32 8Z" fill="#FCE58A" stroke="#8A6100" stroke-width="2.5"/><path d="M24 48h16M26 54h12" stroke="#5E6A73" stroke-width="3" stroke-linecap="round"/>'],
   [/cadenas|serrure/i, '<rect x="14" y="28" width="36" height="26" rx="4" fill="#E0B44A" stroke="#7A5600" stroke-width="2.5"/><path d="M22 28v-8a10 10 0 0 1 20 0v8" fill="none" stroke="#5E6A73" stroke-width="4"/><circle cx="32" cy="40" r="3" fill="#7A5600"/>'],
-  [/riz|ma[ïi]s|mil|farine|sucre|haricot|sac\b/i, '<path d="M16 16h32l4 38H12Z" fill="#F1E7CF" stroke="#8A7A55" stroke-width="2.5" stroke-linejoin="round"/><path d="M16 16q16 6 32 0" fill="none" stroke="#8A7A55" stroke-width="2.5"/><circle cx="32" cy="36" r="7" fill="#C0392B"/>'],
+  [/riz|ma[ïi]s|\bmil\b|farine|sucre|haricot|ni[ée]b[ée]|arachide/i, '<path d="M16 16h32l4 38H12Z" fill="#F1E7CF" stroke="#8A7A55" stroke-width="2.5" stroke-linejoin="round"/><path d="M16 16q16 6 32 0" fill="none" stroke="#8A7A55" stroke-width="2.5"/><circle cx="32" cy="36" r="7" fill="#C0392B"/>'],
   [/huile/i, '<path d="M26 8h12v8l6 8v30a4 4 0 0 1-4 4H24a4 4 0 0 1-4-4V24l6-8Z" fill="#F7D35C" stroke="#8A6100" stroke-width="2.5" stroke-linejoin="round"/><rect x="22" y="32" width="20" height="12" fill="#1f6b4a"/>'],
   [/savon|lessive|omo/i, '<rect x="10" y="22" width="44" height="24" rx="10" fill="#BFE3F2" stroke="#2F6E8A" stroke-width="2.5"/><circle cx="48" cy="16" r="4" fill="none" stroke="#2F6E8A" stroke-width="2"/><circle cx="40" cy="12" r="2.5" fill="none" stroke="#2F6E8A" stroke-width="2"/>'],
   [/pagne|tissu|chemise|t-?shirt|robe|pantalon|habit/i, '<path d="M22 10l-12 8 6 10 6-4v30h20V24l6 4 6-10-12-8q-4 6-10 6t-10-6Z" fill="#7FB2E5" stroke="#2F5DA8" stroke-width="2.5" stroke-linejoin="round"/>'],
@@ -1485,15 +1490,182 @@ async function submitSale() {
 }
 
 /* ===== Onglet Produits ===== */
-function prodIcon(p, size) {
-  const art = artFor(p.name), [bg, fg] = tileColor(p.category || p.name);
-  return art ? `<span class="pic" style="background:#F6F4EE;width:${size}px;height:${size}px" aria-hidden="true">${art}</span>`
-             : `<span class="pic" style="background:${bg};color:${fg};width:${size}px;height:${size}px" aria-hidden="true">${esc(initials(p.name))}</span>`;
+function prodIcon(p, size, extra) {
+  const art = artFor(p.name), [bg, fg] = tileColor(p.category || p.name), st = `width:${size}px;height:${size}px;${extra || ''}`;
+  return art ? `<span class="pic" style="background:#F6F4EE;${st}" aria-hidden="true">${art}</span>`
+             : `<span class="pic" style="background:${bg};color:${fg};${st}" aria-hidden="true">${esc(initials(p.name))}</span>`;
 }
 const isLow = p => Number(p.stock_qty) <= Number(p.alert_threshold);
 const stockColor = p => Number(p.stock_qty) <= 0 ? 'var(--bad)' : isLow(p) ? 'var(--warn)' : 'var(--fg)';
 
+/* ===== Catalogue tout prêt =====
+   Produits courants de chaque métier, avec leur unité et leur rangement. Le commerçant coche les siens
+   et tape seulement ses prix et sa quantité. Les prix ne sont JAMAIS remplis d'avance (chaque boutique
+   a les siens). Première version rangée dans l'application ; plus tard, modifiable depuis l'espace
+   administrateur. */
+const CATALOG = {
+  materiaux: [
+    ['Ciment 50 kg', 'sac', 'Ciment'],
+    ['Fer de 6', 'barre', 'Fer'], ['Fer de 8', 'barre', 'Fer'], ['Fer de 10', 'barre', 'Fer'], ['Fer de 12', 'barre', 'Fer'], ['Fer de 14', 'barre', 'Fer'],
+    ["Fil d'attache", 'kilo', 'Fer'],
+    ['Tôle bac', 'piece', 'Tôles'], ['Tôle ondulée', 'piece', 'Tôles'],
+    ['Pointes 70 mm', 'kilo', 'Clous'], ['Pointes 100 mm', 'kilo', 'Clous'], ['Pointes à tôle', 'kilo', 'Clous'],
+    ['Sable', 'sac', 'Construction'], ['Gravier', 'sac', 'Construction'], ['Chevron', 'piece', 'Bois'], ['Planche', 'piece', 'Bois'], ['Contreplaqué', 'piece', 'Bois'],
+    ['Peinture à eau 20 L', 'seau', 'Peinture'], ['Peinture à huile 4 L', 'piece', 'Peinture'], ['Diluant', 'litre', 'Peinture'], ['Pinceau', 'piece', 'Peinture'], ['Rouleau de peinture', 'piece', 'Peinture'],
+    ['Tuyau PVC', 'barre', 'Plomberie'], ['Coude PVC', 'piece', 'Plomberie'], ['Robinet', 'piece', 'Plomberie'], ['Colle PVC', 'piece', 'Plomberie'],
+    ['Fil électrique', 'metre', 'Électricité'], ['Ampoule', 'piece', 'Électricité'], ['Interrupteur', 'piece', 'Électricité'], ['Prise électrique', 'piece', 'Électricité'],
+    ['Brouette', 'piece', 'Outils'], ['Pelle', 'piece', 'Outils'], ['Pioche', 'piece', 'Outils'], ['Daba', 'piece', 'Outils'], ['Marteau', 'piece', 'Outils'], ['Truelle', 'piece', 'Outils'],
+    ['Cadenas', 'piece', 'Outils'], ['Serrure de porte', 'piece', 'Outils'], ['Colle forte', 'piece', 'Divers'],
+  ],
+  vetements: [
+    ['Pagne wax', 'piece', 'Pagnes'], ['Faso Dan Fani', 'piece', 'Pagnes'], ['Pagne imprimé', 'piece', 'Pagnes'],
+    ['Chemise homme', 'piece', 'Hommes'], ['T-shirt', 'piece', 'Hommes'], ['Pantalon jean', 'piece', 'Hommes'], ['Pantalon tissu', 'piece', 'Hommes'], ['Boubou', 'piece', 'Hommes'], ['Complet homme', 'piece', 'Hommes'],
+    ['Robe', 'piece', 'Femmes'], ['Jupe', 'piece', 'Femmes'], ['Ensemble femme', 'piece', 'Femmes'], ['Foulard', 'piece', 'Femmes'], ['Sac à main', 'piece', 'Femmes'],
+    ['Habit enfant', 'piece', 'Enfants'], ['Uniforme scolaire', 'piece', 'Enfants'],
+    ['Chaussures homme', 'paire', 'Chaussures'], ['Chaussures femme', 'paire', 'Chaussures'], ['Chaussures enfant', 'paire', 'Chaussures'], ['Sandales', 'paire', 'Chaussures'], ['Tapettes', 'paire', 'Chaussures'], ['Baskets', 'paire', 'Chaussures'],
+    ['Chaussettes', 'paire', 'Divers'], ['Sous-vêtement', 'piece', 'Divers'], ['Casquette', 'piece', 'Divers'], ['Ceinture', 'piece', 'Divers'], ['Pull', 'piece', 'Divers'], ['Veste', 'piece', 'Divers'],
+  ],
+  pieces: [
+    ['Pneu moto', 'piece', 'Moto'], ['Chambre à air moto', 'piece', 'Moto'], ['Chaîne moto', 'piece', 'Moto'], ['Kit chaîne moto', 'piece', 'Moto'],
+    ['Plaquettes de frein', 'paire', 'Moto'], ['Mâchoires de frein', 'paire', 'Moto'], ['Bougie', 'piece', 'Moto'], ['Filtre à air', 'piece', 'Moto'],
+    ["Câble d'embrayage", 'piece', 'Moto'], ['Câble de frein', 'piece', 'Moto'], ["Câble d'accélérateur", 'piece', 'Moto'], ['Batterie moto', 'piece', 'Moto'],
+    ['Ampoule de phare', 'piece', 'Moto'], ['Rétroviseur', 'piece', 'Moto'], ['Levier de frein', 'piece', 'Moto'], ['Poignées', 'paire', 'Moto'], ['Selle', 'piece', 'Moto'],
+    ['Huile moteur 1 L', 'piece', 'Huiles'], ['Huile 2 temps', 'piece', 'Huiles'], ['Graisse', 'piece', 'Huiles'],
+    ['Pneu vélo', 'piece', 'Vélo'], ['Chambre à air vélo', 'piece', 'Vélo'], ['Chaîne vélo', 'piece', 'Vélo'], ['Rayons', 'piece', 'Vélo'], ['Patins de frein vélo', 'paire', 'Vélo'],
+    ['Pédales', 'paire', 'Vélo'], ['Pompe à vélo', 'piece', 'Vélo'],
+    ['Roulement', 'piece', 'Divers'], ['Boulons et écrous', 'kilo', 'Divers'], ['Rustine', 'piece', 'Divers'], ['Clé plate', 'piece', 'Divers'],
+  ],
+  telephones: [
+    ['Téléphone simple', 'piece', 'Téléphones'], ['Smartphone', 'piece', 'Téléphones'],
+    ['Chargeur', 'piece', 'Accessoires'], ['Câble USB', 'piece', 'Accessoires'], ['Écouteurs', 'piece', 'Accessoires'], ['Kit main libre', 'piece', 'Accessoires'],
+    ['Batterie de téléphone', 'piece', 'Accessoires'], ['Batterie externe', 'piece', 'Accessoires'], ['Coque', 'piece', 'Accessoires'], ["Verre de protection d'écran", 'piece', 'Accessoires'],
+    ['Carte mémoire', 'piece', 'Mémoire'], ['Clé USB', 'piece', 'Mémoire'], ['Carte SIM', 'piece', 'Divers'],
+    ['Haut-parleur Bluetooth', 'piece', 'Divers'], ['Lampe torche rechargeable', 'piece', 'Divers'], ['Piles', 'piece', 'Divers'], ['Adaptateur de prise', 'piece', 'Divers'], ['Multiprise', 'piece', 'Divers'],
+  ],
+  cosmetiques: [
+    ['Savon de toilette', 'piece', 'Corps'], ['Crème de corps', 'piece', 'Corps'], ['Lait de corps', 'piece', 'Corps'], ['Pommade', 'piece', 'Corps'], ['Vaseline', 'piece', 'Corps'],
+    ['Huile de corps', 'piece', 'Corps'], ['Beurre de karité', 'piece', 'Corps'], ['Parfum', 'piece', 'Corps'], ['Déodorant', 'piece', 'Corps'], ['Éponge de bain', 'piece', 'Corps'],
+    ['Shampoing', 'piece', 'Cheveux'], ['Défrisant', 'piece', 'Cheveux'], ['Mèches', 'piece', 'Cheveux'], ['Perruque', 'piece', 'Cheveux'], ['Gel coiffant', 'piece', 'Cheveux'], ['Peigne', 'piece', 'Cheveux'],
+    ['Rouge à lèvres', 'piece', 'Maquillage'], ['Vernis à ongles', 'piece', 'Maquillage'], ['Poudre', 'piece', 'Maquillage'], ['Crayon pour les yeux', 'piece', 'Maquillage'],
+    ['Brosse à dents', 'piece', 'Hygiène'], ['Dentifrice', 'piece', 'Hygiène'], ['Serviettes hygiéniques', 'piece', 'Hygiène'], ['Couches bébé', 'piece', 'Hygiène'], ['Lames de rasoir', 'piece', 'Hygiène'],
+  ],
+  alimentation: [
+    ['Riz 50 kg', 'sac', 'Céréales'], ['Riz au kilo', 'kilo', 'Céréales'], ['Maïs', 'kilo', 'Céréales'], ['Mil', 'kilo', 'Céréales'], ['Farine de blé', 'kilo', 'Céréales'],
+    ['Haricot (niébé)', 'kilo', 'Céréales'], ['Arachide', 'kilo', 'Céréales'], ['Spaghetti', 'piece', 'Céréales'], ['Pâtes alimentaires', 'piece', 'Céréales'],
+    ['Sucre en poudre', 'kilo', 'Épicerie'], ['Sucre en morceaux', 'piece', 'Épicerie'], ['Sel', 'kilo', 'Épicerie'], ['Bouillon cube', 'piece', 'Épicerie'], ['Tomate concentrée', 'piece', 'Épicerie'],
+    ['Huile 1 L', 'piece', 'Huiles'], ['Huile 5 L', 'piece', 'Huiles'], ['Huile 20 L', 'piece', 'Huiles'],
+    ['Lait en poudre', 'piece', 'Lait et boissons'], ['Lait concentré', 'piece', 'Lait et boissons'], ['Café', 'piece', 'Lait et boissons'], ['Thé', 'piece', 'Lait et boissons'],
+    ['Eau minérale (pack)', 'carton', 'Lait et boissons'], ['Boisson sucrée', 'piece', 'Lait et boissons'], ['Sardine', 'piece', 'Conserves'], ['Biscuits', 'piece', 'Conserves'],
+    ['Œufs (plaquette)', 'piece', 'Frais'], ['Savon', 'piece', 'Entretien'], ['Lessive en poudre', 'piece', 'Entretien'], ['Pétrole', 'litre', 'Entretien'], ['Bougies', 'piece', 'Entretien'], ['Allumettes', 'piece', 'Entretien'],
+  ]
+};
+const catItems = () => (CATALOG[S.shop.type] || []).map(([name, unit, category]) => ({ name, unit, category }));
+const nameKey = n => String(n).trim().toLowerCase();
+const unitAu = u => (['piece', 'barre', 'paire'].includes(u) ? 'à la ' : 'au ') + UNITS[u];
+
+// « Nouveau produit » : catalogue (conseillé) ou à la main.
+function newProductChoice() {
+  if (!catItems().length) return openSheet('new');
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Nouveau produit">
+    <h2>Ajouter des produits</h2>
+    <button class="btn huge" id="np-cat" style="height:auto;padding:16px">📋 Choisir dans la liste<br><small style="font:400 13px var(--f-body);opacity:.85">produits courants déjà prêts, vous tapez seulement les prix</small></button>
+    <button class="btn ghost" id="np-hand" style="padding:14px">✍️ Créer un produit à la main</button>
+    <button class="btn ghost" id="cancel">Annuler</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#np-cat').onclick = () => { closeSheet(); S.catMode = 'pick'; S.catPick = S.catPick || new Map(); window.scrollTo(0, 0); viewProducts(); };
+  $('#np-hand').onclick = () => openSheet('new');
+}
+
+// Étape 1 : toucher les produits vendus dans la boutique.
+function viewCatalog() {
+  const have = new Set(S.products.map(p => nameKey(p.name)));
+  const items = catItems(), cats = [...new Set(items.map(x => x.category))];
+  if (S.catCat && !cats.includes(S.catCat)) S.catCat = '';
+  const t = (S.catQ || '').trim().toLowerCase();
+  const list = items.filter(x => (!S.catCat || x.category === S.catCat) && (!t || x.name.toLowerCase().includes(t)));
+  $('#view').innerHTML = `<div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="cat-back" style="flex:0 0 auto">‹ Produits</button>
+      <h2 style="flex:1 1 auto">Touchez vos produits</h2></div>
+    <input id="cat-q" type="search" placeholder="🔍 Chercher dans la liste" value="${esc(S.catQ || '')}" autocomplete="off" style="height:50px;font-size:16px">
+    <div class="chips" role="group" aria-label="Rayons"><button aria-pressed="${!S.catCat}" data-cc="">Tout</button>${cats.map(c => `<button aria-pressed="${S.catCat === c}" data-cc="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    <div class="tiles">${list.map(x => { const k = nameKey(x.name), on = S.catPick.has(k), done = have.has(k);
+      return `<button class="tile${on ? ' in' : ''}" data-ci="${esc(k)}" ${done ? 'disabled' : ''} aria-pressed="${on}">
+        ${prodIcon(x, 58, 'margin:0 auto')}
+        <span class="tn">${esc(x.name)}</span><span class="muted" style="font-size:12px">${done ? 'déjà ajouté' : esc(unitAu(x.unit))}</span>
+        ${on ? '<span class="tq" aria-hidden="true">✓</span>' : ''}</button>`; }).join('') || '<p class="empty" style="grid-column:1/-1">Rien trouvé.</p>'}</div>
+    <button class="btn ghost" id="cat-hand">✍️ Mon produit n'est pas dans la liste</button>
+    <div id="bar-space" style="height:${S.catPick.size ? 84 : 0}px"></div>
+    ${S.catPick.size ? `<div class="cartbar" id="catbar"><button type="button" id="cat-next"><span class="ct"><small>${S.catPick.size} produit${S.catPick.size > 1 ? 's' : ''} choisi${S.catPick.size > 1 ? 's' : ''}</small><b>Suivant</b></span><span class="go">Prix ›</span></button></div>` : ''}`;
+  const bar = $('#catbar'); if (bar) { const tabs = document.querySelector('.tabs'); bar.style.bottom = (tabs ? tabs.offsetHeight : 0) + 'px'; }
+  $('#cat-back').onclick = () => { S.catMode = null; viewProducts(); };
+  $('#cat-hand').onclick = () => openSheet('new');
+  const q = $('#cat-q'); q.oninput = () => { S.catQ = q.value; const pos = q.selectionStart; viewCatalog(); const q2 = $('#cat-q'); q2.focus(); q2.setSelectionRange(pos, pos); };
+  document.querySelectorAll('[data-cc]').forEach(b => b.onclick = () => { S.catCat = b.dataset.cc; viewCatalog(); });
+  document.querySelectorAll('[data-ci]').forEach(b => b.onclick = () => {
+    const k = b.dataset.ci;
+    if (S.catPick.has(k)) S.catPick.delete(k); else S.catPick.set(k, { ...items.find(x => nameKey(x.name) === k), sell: '', buy: '', qty: '' });
+    const y = window.scrollY; viewCatalog(); window.scrollTo(0, y);
+  });
+  const nx = $('#cat-next'); if (nx) nx.onclick = () => { S.catMode = 'prices'; window.scrollTo(0, 0); viewProducts(); };
+}
+
+// Étape 2 : pour chaque produit choisi, prix de vente, prix d'achat, quantité.
+function viewCatalogPrices() {
+  const rows = [...S.catPick.values()];
+  const big = 'style="font-size:18px;height:50px;font-weight:700"';
+  $('#view').innerHTML = `<div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="cat-back" style="flex:0 0 auto">‹ Liste</button>
+      <h2 style="flex:1 1 auto">Vos prix (${rows.length})</h2></div>
+    <p class="muted" style="margin:0;font-size:13.5px">Pour chaque produit : votre prix de vente, votre prix d'achat, et combien vous en avez.</p>
+    ${rows.map((x, i) => `<section class="card stack" style="gap:10px" data-row="${i}">
+      <div style="display:flex;gap:10px;align-items:center">${prodIcon(x, 44)}<div style="min-width:0;flex:1 1 auto"><b>${esc(x.name)}</b><div class="muted" style="font-size:12.5px">${esc(unitAu(x.unit))}</div></div>
+        <button class="btn ghost small" data-rm="${i}" aria-label="Retirer ${esc(x.name)}" style="flex:0 0 auto">✕</button></div>
+      <div class="row"><label>Prix de vente<input data-f="sell" data-i="${i}" type="number" inputmode="numeric" min="0" step="1" value="${esc(x.sell)}" ${big}></label>
+        <label>Prix d'achat<input data-f="buy" data-i="${i}" type="number" inputmode="numeric" min="0" step="1" value="${esc(x.buy)}" ${big}></label></div>
+      <label>Quantité en stock (${esc(UNITS[x.unit])})<input data-f="qty" data-i="${i}" type="number" inputmode="decimal" min="0" step="${WHOLE.includes(x.unit) ? 1 : 'any'}" value="${esc(x.qty)}" placeholder="0" ${big}></label>
+      <div class="row-msg" id="msg-${i}"></div></section>`).join('')}
+    <button class="btn huge" id="cat-save" ${canWrite() ? '' : 'disabled'}>✓ Enregistrer ${rows.length} produit${rows.length > 1 ? 's' : ''}</button>`;
+  $('#cat-back').onclick = () => { S.catMode = 'pick'; viewProducts(); };
+  document.querySelectorAll('[data-f]').forEach(inp => inp.oninput = () => { rows[inp.dataset.i][inp.dataset.f] = inp.value; S.catWarnOk = false; });
+  document.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.catPick.delete(nameKey(rows[b.dataset.rm].name));
+    if (!S.catPick.size) { S.catMode = 'pick'; return viewProducts(); } viewCatalogPrices(); });
+  $('#cat-save').onclick = saveCatalog;
+}
+
+async function saveCatalog() {
+  const rows = [...S.catPick.values()], btn = $('#cat-save');
+  let bad = false, warn = false;
+  rows.forEach((x, i) => {
+    const m = $('#msg-' + i), sell = Number(x.sell), buy = Number(x.buy), q = x.qty === '' ? 0 : Number(x.qty);
+    let t = '';
+    if (x.sell === '' || !(sell > 0)) t = 'Tapez le prix de vente.';
+    else if (x.buy === '' || !(buy >= 0)) t = 'Tapez le prix d\'achat.';
+    else if (!(q >= 0) || (WHOLE.includes(x.unit) && q !== Math.trunc(q))) t = 'Quantité invalide' + (WHOLE.includes(x.unit) ? ' (nombre entier).' : '.');
+    if (t) bad = true;
+    const loss = !t && sell < buy;
+    if (loss) warn = true;
+    m.innerHTML = t ? `<div class="banner bad" style="margin:0">${esc(t)}</div>` : loss ? `<div class="banner" style="margin:0">Attention : vente à perte (vente ${esc(money(sell))} &lt; achat ${esc(money(buy))}).</div>` : '';
+  });
+  if (bad) return toast('Complétez les cases en rouge.', true);
+  if (warn && !S.catWarnOk) { S.catWarnOk = true; btn.textContent = 'Confirmer quand même'; return toast('Un prix de vente est plus bas que le prix d\'achat. Vérifiez, ou touchez « Confirmer quand même ».', true); }
+  btn.disabled = true;
+  let ok = 0;
+  for (const [i, x] of rows.entries()) {
+    btn.textContent = `Enregistrement ${i + 1} / ${rows.length}…`;
+    const { error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: x.name, p_category: x.category, p_unit: x.unit,
+      p_buy_price: Math.round(Number(x.buy)), p_sell_price: Math.round(Number(x.sell)), p_initial_qty: x.qty === '' ? 0 : Number(x.qty), p_alert: 0, p_barcode: null });
+    if (error) { $('#msg-' + i).innerHTML = `<div class="banner bad" style="margin:0">${esc(cleanErr(error))}</div>`; continue; }
+    S.catPick.delete(nameKey(x.name)); ok++;
+  }
+  await loadProducts(); S.summary = null;
+  if (!S.catPick.size) { S.catMode = null; S.catWarnOk = false; toast(`${ok} produit${ok > 1 ? 's' : ''} ajouté${ok > 1 ? 's' : ''} ✓`); return viewProducts(); }
+  toast(`${ok} ajouté(s). Les autres ont un problème : voir en rouge.`, true);
+  viewCatalogPrices();
+}
+
 function viewProducts() {
+  if (S.catMode === 'pick' && isManager()) return viewCatalog();
+  if (S.catMode === 'prices' && isManager() && S.catPick && S.catPick.size) return viewCatalogPrices();
+  S.catMode = null;
   const mgr = isManager(), low = S.products.filter(isLow).length;
   if (!['all', 'low'].includes(S.pFilter)) S.pFilter = 'all';
   $('#view').innerHTML = `${S.countPending === 'submitted' && S.role === 'owner' ? '<div class="banner">Un comptage du gérant attend votre validation : touchez « Comptage ».</div>' : S.countPending === 'open' ? '<div class="banner">Un comptage est en cours : touchez « Comptage » pour le continuer.</div>' : ''}
@@ -1517,7 +1689,7 @@ function viewProducts() {
   draw1();
   $('#pq').oninput = ev => { S.pq = ev.target.value; draw1(); };
   document.querySelectorAll('[data-pf]').forEach(b => b.onclick = () => { S.pFilter = b.dataset.pf; viewProducts(); });
-  const n = $('#newp'); if (n) n.onclick = () => openSheet('new');
+  const n = $('#newp'); if (n) n.onclick = newProductChoice;
   const lb = $('#labels'); if (lb) lb.onclick = openLabels;
   const ct = $('#count'); if (ct) ct.onclick = () => { S.tab = 'count'; draw(); };
 }
