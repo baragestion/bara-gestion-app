@@ -168,6 +168,24 @@ button.prod:hover{border-color:var(--accent)}
 .quick{display:flex;gap:8px;flex-wrap:wrap}
 .quick button{flex:1 1 0;min-width:0;height:44px;border-radius:12px;border:0;background:var(--accent-soft);color:var(--accent);font-weight:700;cursor:pointer}
 .btn.huge{height:64px;font:700 21px var(--f-display);border-radius:18px;width:100%}
+
+/* Accueil, Plus, cloche */
+.bellb{position:relative;flex:0 0 auto;font-size:18px;padding:6px 12px;margin-right:6px}
+.bellb .badge{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--bad);color:#fff;font:700 11.5px var(--f-body);display:flex;align-items:center;justify-content:center}
+.hero{border-radius:20px;padding:18px;background:var(--accent);color:var(--accent-ink)}
+.hero-n{font:800 36px/1.1 var(--f-display);margin-top:2px;font-variant-numeric:tabular-nums}
+.hero-s{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:14px}
+.htiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.htile{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:14px;min-height:112px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;gap:6px;text-align:left;cursor:pointer}
+.htile .hic{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px}
+.htile .hl{font:700 19px var(--f-display)}
+.htile .hbadge{position:absolute;top:12px;right:12px;border-radius:10px;padding:3px 8px;font-size:12.5px;font-weight:700;background:var(--accent-soft);color:var(--accent)}
+.htile .hbadge.warn{background:var(--warn-soft);color:var(--warn)}
+.htile .hbadge.bad{background:var(--bad-soft);color:var(--bad)}
+.arow{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:12px;border:1px solid var(--line);border-left:5px solid var(--line)}
+.arow.bad{border-left-color:var(--bad)}
+.arow.warn{border-left-color:var(--warn)}
+.arow .aic{font-size:22px;line-height:1.2}
 </style>
 
 </head>
@@ -211,7 +229,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26h';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26i';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -452,9 +470,9 @@ async function refreshAlerts() {
   await loadAlertCount();
   if (S.alertCount !== before) {
     S.alerts = null;
-    const b = document.querySelector('[data-tab=team]');
-    if (b) b.textContent = S.alertCount ? `Équipe (${S.alertCount})` : 'Équipe';
-    if (S.alertCount > before) toast('Nouvelle alerte : voir l\'onglet Équipe.');
+    const b = document.getElementById('bell');
+    if (b) b.innerHTML = '🔔' + (S.alertCount ? `<span class="badge">${S.alertCount > 99 ? '99+' : S.alertCount}</span>` : '');
+    if (S.alertCount > before) toast('🔔 Nouvelle alerte : touchez la cloche en haut.');
   }
 }
 async function loadAlertCount() {
@@ -551,13 +569,8 @@ function offlineAdminHtml() {
         <span style="text-align:right">vu ${dt(d.last_seen)}${d.pending ? ` · <b style="color:var(--bad)">${esc(d.pending)} en attente</b>` : ''}</span></div>`).join('')
         : '<p class="muted" style="margin:0">Aucun téléphone enregistré pour le moment.</p>'}
     </section>
-    <section class="card stack">
-      <div class="row"><h2 style="flex:1 1 auto">Alertes${unseen ? ` (${unseen} nouvelle${unseen > 1 ? 's' : ''})` : ''}</h2>
-        ${unseen ? '<button class="btn ghost small" id="al-seen" style="flex:0 0 auto">Marquer comme vues</button>' : ''}</div>
-      ${S.alerts.length ? S.alerts.map(a => `<div style="font-size:13.5px;${a.seen_at ? 'opacity:.65' : ''}">
-          <span class="muted">${dt(a.created_at)}</span> ${a.seen_at ? '' : '<span class="tag warn">Nouveau</span>'}<br>${esc((ALERT_TEXT[a.kind] || (() => a.kind))(a, (S.names && S.names[a.user_id]) || 'compte supprimé'))}</div>`).join('')
-        : '<p class="muted" style="margin:0">Aucune alerte.</p>'}
-    </section>`;
+    <section class="card stack"><h2>Alertes</h2><p class="muted" style="margin:0;font-size:13.5px">Les alertes sont maintenant dans la cloche 🔔 en haut de l'écran.</p>
+      <button class="btn ghost small" id="al-open">Ouvrir les alertes${unseen ? ` (${unseen})` : ''}</button></section>`;
 }
 
 function bindOfflineAdmin() {
@@ -568,12 +581,7 @@ function bindOfflineAdmin() {
     if (error) return toast(cleanErr(error), true);
     S.shop.maxPending = v; toast('Plafond enregistré.'); saveCache();
   };
-  const seen = $('#al-seen');
-  if (seen) seen.onclick = async () => {
-    const { error } = await sb.rpc('mark_alerts_seen', { p_shop: S.shop.id });
-    if (error) return toast(cleanErr(error), true);
-    S.alertCount = 0; S.alerts = null; S.team = null; draw();
-  };
+  const ao = $('#al-open'); if (ao) ao.onclick = alertsSheet;
   document.querySelectorAll('[data-disc]').forEach(b => b.onclick = () => openDiscMax(b.dataset.disc));
   document.querySelectorAll('[data-cr]').forEach(b => b.onclick = async () => {
     b.disabled = true;
@@ -939,7 +947,7 @@ async function selectShop(id) {
     discMax: Number(m.discount_max_pct) || 0, creditAllowed: !!m.credit_allowed };
   S.role = m.role;
   storage.setItem('bg_shop', id);
-  S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = 'sale';
+  S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = (m.role === 'owner' || m.role === 'manager') ? 'home' : 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
   await Promise.all([loadProducts().then(() => canCredit() ? loadCustomers(true) : null), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings()]);
   saveCache();
@@ -1008,17 +1016,17 @@ function subBanner() {
   return '';
 }
 
-const TAB_IC = { sale: '🛒', products: '📦', history: '🧾', clients: '👥', cash: '💰', report: '📊', team: '⚙️' };
+const TAB_IC = { home: '🏠', sale: '🛒', products: '📦', history: '🧾', clients: '👥', cash: '💰', report: '📊', team: '⚙️', more: '☰' };
+const MORE_TABS = ['history', 'cash', 'report', 'team', 'more'];
 function draw() {
-  const tabs = [['sale','Vendre'], ['products','Produits']];
   if (S.tab === 'count' && !isManager()) S.tab = 'products';
-  if (S.offline) { if (!['sale', 'products'].includes(S.tab)) S.tab = 'sale'; }   // le reste demande internet
-  else {
-    tabs.push(['history','Ventes'], ['clients','Clients'], ['cash','Caisse']);
-    if (isManager()) tabs.push(['report','Bilan']);
-    if (S.role === 'owner') tabs.push(['team', S.alertCount ? `Équipe (${S.alertCount})` : 'Équipe']);
-  }
-  const multi = S.memberships.length > 1;
+  let tabs;
+  if (S.offline) { tabs = [['sale', 'Vendre'], ['products', 'Produits']]; if (!['sale', 'products'].includes(S.tab)) S.tab = 'sale'; }   // le reste demande internet
+  else if (isManager()) tabs = [['home', 'Accueil'], ['sale', 'Vendre'], ['products', 'Produits'], ['clients', 'Clients'], ['more', 'Plus']];
+  else tabs = [['sale', 'Vendre'], ['products', 'Produits'], ['history', 'Ventes'], ['clients', 'Clients'], ['cash', 'Caisse']];
+  if (S.tab === 'home' && (!isManager() || S.offline)) S.tab = 'sale';
+  const cur = k => S.tab === k || (S.tab === 'count' && k === 'products') || (k === 'more' && isManager() && MORE_TABS.includes(S.tab));
+  const multi = S.memberships.length > 1, bell = S.role === 'owner' && !S.offline;
   $('#app').innerHTML = `
     <header class="top">
       <div class="top-row">
@@ -1027,18 +1035,101 @@ function draw() {
                   : `<div class="shopname">${esc(S.shop.name)}</div>`}
           <div class="who">${esc(whoLine())}</div>
         </div>
+        ${bell ? `<button class="btn ghost small bellb" id="bell" aria-label="Alertes${S.alertCount ? ' : ' + S.alertCount + ' nouvelle(s)' : ''}">🔔${S.alertCount ? `<span class="badge">${S.alertCount > 99 ? '99+' : S.alertCount}</span>` : ''}</button>` : ''}
         <button class="btn ghost small" id="lockb" aria-label="Mon compte : verrouiller, code, quitter" style="flex:0 0 auto;font-size:18px;padding:6px 12px">👤</button>
       </div>
       ${banner()}
     </header>
     <main id="view"></main>
-    <nav class="tabs${tabs.length > 5 ? ' many' : ''}" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${S.tab===k || (S.tab==='count' && k==='products')?'aria-current="page"':''}><span class="ic" aria-hidden="true">${TAB_IC[k] || ''}</span><span>${l}</span></button>`).join('')}</nav>
+    <nav class="tabs" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${cur(k) ? 'aria-current="page"' : ''}><span class="ic" aria-hidden="true">${TAB_IC[k] || ''}</span><span>${l}</span></button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
   $('#lockb').onclick = myLockSheet;
+  const bl = $('#bell'); if (bl) bl.onclick = alertsSheet;
   const sp = $('#shop-pick'); if (sp) sp.onchange = () => selectShop(sp.value);
   document.body.classList.remove('paying');
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { stopScan(); S.tab = b.dataset.tab; draw(); });
-  ({ sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash, clients: viewClients })[S.tab]();
+  goView(S.tab);
+}
+function goView(t) {
+  ({ home: viewHome, more: viewMore, sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash, clients: viewClients })[t]();
+}
+function go(t) { stopScan(); S.tab = t; draw(); window.scrollTo(0, 0); }
+
+/* ===== Accueil du jour (propriétaire et gérant) ===== */
+async function viewHome() {
+  $('#view').innerHTML = '<p class="empty">Chargement…</p>';
+  const day = new Date(); day.setUTCHours(0, 0, 0, 0);
+  const [sum, last] = await Promise.all([
+    sb.rpc('shop_summary', { p_shop: S.shop.id, p_from: day.toISOString(), p_to: new Date(day.getTime() + 86400000).toISOString() }),
+    sb.from('sales').select('id,total,created_at,status,sale_items(quantity,products(name,unit))').eq('shop_id', S.shop.id).eq('status', 'completed')
+      .gte('created_at', day.toISOString()).order('created_at', { ascending: false }).limit(4)]);
+  if (S.tab !== 'home') return;
+  const d = sum.data || {}, sales = last.data || [];
+  const open = S.cash && S.cash.open;
+  const T = (tab, ic, bg, label, badge, badgeCls) => `<button class="htile" data-go="${tab}"><span class="hic" style="background:${bg}" aria-hidden="true">${ic}</span>
+    ${badge ? `<span class="hbadge ${badgeCls || ''}">${badge}</span>` : ''}<span class="hl">${label}</span></button>`;
+  $('#view').innerHTML = `
+    ${S.alertCount && S.role === 'owner' ? `<button class="banner bad" id="h-al" style="border:0;width:100%;text-align:left;font-weight:600;cursor:pointer;margin:0">🔔 ${S.alertCount} alerte${S.alertCount > 1 ? 's' : ''} à voir ›</button>` : ''}
+    <section class="hero">
+      <div style="opacity:.85;font-size:14px">Aujourd'hui</div>
+      <div class="hero-n">${esc(money(d.revenue || 0))}</div>
+      <div class="hero-s"><span>🧾 ${esc(d.sales_count || 0)} vente${(d.sales_count || 0) > 1 ? 's' : ''}</span><span>${open ? '💰 Caisse ouverte' : '💰 Caisse fermée'}</span></div>
+    </section>
+    <div class="htiles">
+      ${T('sale', '🛒', 'var(--accent-soft)', 'Vendre')}
+      ${T('products', '📦', '#E8EEF8', 'Stock', d.low_stock_count ? d.low_stock_count + ' bas' : '', 'warn')}
+      ${T('clients', '👥', '#F7E6E3', 'Clients', d.credit_outstanding ? fmtNum.format(d.credit_outstanding) + ' F' : '', 'bad')}
+      ${T('cash', '💰', '#FBF1D6', 'Caisse', open ? '' : 'fermée', 'warn')}
+    </div>
+    <section class="card stack" style="gap:8px">
+      <div class="row" style="align-items:center"><h3 style="flex:1 1 auto;margin:0">Dernières ventes</h3><button class="btn ghost small" data-go="history" style="flex:0 0 auto">Tout voir</button></div>
+      ${sales.length ? sales.map(x => `<div class="row" style="font-size:14.5px;align-items:baseline;flex-wrap:nowrap"><span class="muted" style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${new Date(x.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · ${esc((x.sale_items || []).map(i => (i.products?.name || '') + ' ×' + qty(i.quantity)).join(', '))}</span><b class="num" style="flex:0 0 auto">${esc(money(x.total))}</b></div>`).join('')
+        : '<p class="muted" style="margin:0">Pas encore de vente aujourd\'hui.</p>'}
+    </section>
+    <button class="btn huge" data-go="sale">＋ Nouvelle vente</button>`;
+  document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+  const ha = $('#h-al'); if (ha) ha.onclick = alertsSheet;
+}
+
+/* ===== Plus : les autres écrans en grosses tuiles ===== */
+function viewMore() {
+  const T = (tab, ic, label, sub) => `<button class="htile" data-go="${tab}" style="min-height:120px"><span class="hic" aria-hidden="true" style="background:var(--accent-soft)">${ic}</span><span class="hl">${label}</span><span class="muted" style="font-size:12.5px;font-weight:400">${sub}</span></button>`;
+  $('#view').innerHTML = `<h2>Plus</h2><div class="htiles">
+    ${T('history', '🧾', 'Ventes et devis', 'factures, annulations, devis')}
+    ${T('cash', '💰', 'Caisse', 'ouvrir, dépenses, fermer')}
+    ${T('report', '📊', 'Bilan', 'chiffres, marge, dépenses')}
+    ${S.role === 'owner' ? T('team', '⚙️', 'Équipe et réglages', 'employés, droits, sécurité') : ''}
+  </div>`;
+  document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+}
+
+/* ===== Cloche des alertes (propriétaire) ===== */
+const ALERT_IC = { cash_gap: ['💰', 'bad'], discount_over: ['🏷️', 'warn'], negative_stock: ['📦', 'warn'], device_new: ['📱', ''], offline_not_allowed: ['📴', 'warn'],
+  price_diff: ['💲', 'warn'], count_gap: ['🔢', 'warn'], credit_not_allowed: ['📒', 'bad'], credit_over: ['📒', 'bad'], payment_cancelled: ['↩️', 'warn'], advance_refund: ['💸', 'warn'], clock: ['⏰', ''] };
+async function alertsSheet() {
+  await ensureNames();
+  const { data, error } = await sb.from('alerts').select('id, kind, user_id, details, created_at, seen_at').eq('shop_id', S.shop.id).order('created_at', { ascending: false }).limit(40);
+  if (error) return toast(cleanErr(error), true);
+  const list = data || [], unseen = list.filter(a => !a.seen_at);
+  const row = a => { const [ic, c] = ALERT_IC[a.kind] || ['🔔', ''];
+    return `<div class="arow ${c}" style="${a.seen_at ? 'opacity:.6' : ''}"><span class="aic" aria-hidden="true">${ic}</span>
+      <div style="min-width:0"><div style="font-size:14px">${esc((ALERT_TEXT[a.kind] || (() => a.kind))(a, (S.names && S.names[a.user_id]) || 'compte supprimé'))}</div>
+      <div class="muted" style="font-size:12px">${dt(a.created_at)}${a.seen_at ? '' : ' · <b style="color:var(--bad)">nouveau</b>'}</div></div></div>`; };
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Alertes">
+    <h2>🔔 Alertes</h2>
+    ${list.length ? `${unseen.length ? `<div class="muted" style="font-weight:700;font-size:12.5px">NOUVELLES (${unseen.length})</div>${unseen.map(row).join('')}` : ''}
+      ${list.length > unseen.length ? `<div class="muted" style="font-weight:700;font-size:12.5px">DÉJÀ VUES</div>${list.filter(a => a.seen_at).map(row).join('')}` : ''}`
+      : '<p class="muted">Aucune alerte. Tout va bien ✓</p>'}
+    ${unseen.length ? '<button class="btn" id="al-seen2">✓ Tout marquer comme vu</button>' : ''}
+    <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  const ms = $('#al-seen2');
+  if (ms) ms.onclick = async () => {
+    const { error: e2 } = await sb.rpc('mark_alerts_seen', { p_shop: S.shop.id });
+    if (e2) return toast(cleanErr(e2), true);
+    S.alertCount = 0; S.alerts = null; closeSheet(); draw();
+  };
 }
 
 /* ===== Onglet Vente ===== */
