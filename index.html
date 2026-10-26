@@ -130,6 +130,43 @@ button.prod:hover{border-color:var(--accent)}
 .lock .pad button:active{background:var(--accent-soft)}
 .lock .msg{min-height:22px;font-weight:600}
 .lock .msg.bad{color:var(--bad)}
+
+/* Vente simplifiée : tuiles, barre du panier, paiement */
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips button{flex:0 0 auto;height:38px;padding:0 15px;border-radius:19px;border:1px solid var(--line);background:var(--surface);font-weight:600;font-size:14px;cursor:pointer}
+.chips button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (min-width:560px){.tiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.tile{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:8px;display:grid;gap:5px;text-align:center;cursor:pointer;min-width:0}
+.tile:disabled{opacity:.45;cursor:not-allowed}
+.tile.in{outline:3px solid var(--accent);outline-offset:-1px}
+.tile .ini{height:58px;border-radius:12px;display:flex;align-items:center;justify-content:center;font:800 22px var(--f-display)}
+.tile .tn{font-weight:600;font-size:13.5px;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-height:32px;overflow-wrap:anywhere}
+.tile .tp{font:700 16px var(--f-display);font-variant-numeric:tabular-nums}
+.tile .tq{position:absolute;top:4px;right:4px;min-width:28px;height:28px;padding:0 6px;border-radius:14px;background:var(--accent);color:var(--accent-ink);font:800 14px var(--f-body);display:flex;align-items:center;justify-content:center}
+.tile .ts{font-size:11.5px;color:var(--bad);font-weight:600}
+.cartbar{position:fixed;left:0;right:0;z-index:6;padding:8px max(12px,env(safe-area-inset-right,0px)) 8px max(12px,env(safe-area-inset-left,0px));background:var(--bg)}
+.cartbar button{width:100%;max-width:720px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:64px;border:0;border-radius:18px;background:var(--accent);color:var(--accent-ink);padding:0 20px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.18)}
+.cartbar .ct{display:grid;text-align:left;line-height:1.15}
+.cartbar .ct small{font-size:12.5px;opacity:.85}
+.cartbar .ct b{font:800 24px var(--f-display);font-variant-numeric:tabular-nums}
+.cartbar .go{font:700 20px var(--f-display)}
+.pline{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;padding-block:10px;border-bottom:1px solid var(--line)}
+.pline .nm{font-weight:600;overflow-wrap:anywhere}
+.step{display:flex;align-items:center;gap:6px}
+.step button{width:42px;height:42px;border-radius:12px;border:1px solid var(--line);background:var(--bg);font:700 22px var(--f-body);cursor:pointer}
+.step input{width:64px;text-align:center;padding:8px 4px;font-weight:700;font-size:17px}
+.modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.modes button{height:76px;border-radius:16px;border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-weight:700;font-size:14.5px;cursor:pointer}
+.modes button .mi{font-size:24px;line-height:1}
+.modes button[aria-pressed="true"]{border:3px solid var(--accent);background:var(--accent-soft);color:var(--accent)}
+.bigtotal{font:800 38px/1.1 var(--f-display);font-variant-numeric:tabular-nums;text-align:center}
+.change{display:flex;justify-content:space-between;align-items:center;border-radius:14px;padding:12px 16px;background:var(--warn-soft);color:var(--warn);font-weight:700}
+.change b{font:800 26px var(--f-display);font-variant-numeric:tabular-nums}
+.quick{display:flex;gap:8px;flex-wrap:wrap}
+.quick button{flex:1 1 0;min-width:0;height:44px;border-radius:12px;border:0;background:var(--accent-soft);color:var(--accent);font-weight:700;cursor:pointer}
+.btn.huge{height:64px;font:700 21px var(--f-display);border-radius:18px;width:100%}
 </style>
 
 </head>
@@ -173,7 +210,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26c';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26d';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -344,7 +381,7 @@ function queueSale(total, paid, pay, customer, disc = 0) {
     const c = JSON.parse(storage.getItem(CACHE_KEY) || 'null');
     if (c && c.userId === S.user.id) { c.products = S.products.map(p => ({ ...p })); storage.setItem(CACHE_KEY, JSON.stringify(c)); }
   } catch (e) {}
-  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.last = { rec, total };
+  resetSale(); S.last = { rec, total, change: S.pendingChange || 0 }; S.pendingChange = 0;
   toast('Vente gardée sur le téléphone : ' + money(total) + ' (réf. ' + rec.offline_ref + ')');
   draw();
   syncQueue();
@@ -979,17 +1016,22 @@ function cartTotal() {
 }
 
 function viewSale() {
+  if (S.payOpen && S.cart.size) return viewPay();
+  S.payOpen = false;
+  const cats = [...new Set(S.products.map(p => p.category).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'fr'));
+  if (S.cat && !cats.includes(S.cat)) S.cat = '';
   $('#view').innerHTML = `${!S.offline && S.cash && !S.cash.open ? '<div class="banner">Caisse non ouverte. <button class="btn small" id="go-cash" style="margin-left:6px">Ouvrir la caisse</button></div>' : ''}
-    ${S.last ? `<section class="card"><div class="row" style="align-items:center"><div>${S.last.rec ? 'Vente gardée (hors ligne)' : 'Vente enregistrée'} : <b class="num">${esc(money(S.last.total))}</b></div>
-      <button class="btn small" id="last-inv" style="flex:0 0 auto">Facture</button><button class="btn ghost small" id="last-x" style="flex:0 0 auto">OK</button></div></section>` : ''}
-    <section class="card stack">
-      <h2>Nouvelle vente</h2>
-      <div class="row" style="align-items:flex-end;flex-wrap:nowrap">
-        <label style="flex:1 1 auto">Chercher un produit ou scanner un code<input id="q" type="search" placeholder="Nom, ou code-barres puis Entrée" value="${esc(S.q)}" autocomplete="off"></label>
-        ${canScan() ? '<button class="btn small" type="button" id="scan" style="flex:0 0 auto;margin-bottom:2px" aria-label="Scanner avec la caméra">📷 Scanner</button>' : ''}</div>
-      <div class="plist" id="plist"></div>
-    </section>
-    <section class="card stack" id="cart"></section>`;
+    ${S.last ? `<section class="card" style="display:grid;gap:8px;border-color:var(--accent)">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:26px" aria-hidden="true">✅</span>
+        <div style="flex:1 1 auto">${S.last.rec ? 'Vente gardée (hors ligne)' : 'Vente enregistrée'}<br><b class="num" style="font-size:20px">${esc(money(S.last.total))}</b></div>
+        <button class="btn small" id="last-inv" style="flex:0 0 auto">Facture</button><button class="btn ghost small" id="last-x" style="flex:0 0 auto">OK</button></div>
+      ${S.last.change > 0 ? `<div class="change"><span>Rendez la monnaie</span><b>${esc(money(S.last.change))}</b></div>` : ''}</section>` : ''}
+    <div style="display:flex;gap:8px">
+      <input id="q" type="search" placeholder="🔍 Chercher un produit" value="${esc(S.q)}" autocomplete="off" aria-label="Chercher un produit ou taper un code-barres" style="flex:1 1 auto;height:50px;font-size:16px">
+      ${canScan() ? '<button class="btn" type="button" id="scan" style="flex:0 0 auto;width:58px;height:50px;font-size:22px;padding:0" aria-label="Scanner un code-barres">📷</button>' : ''}</div>
+    ${cats.length > 1 ? `<div class="chips" role="group" aria-label="Catégories"><button aria-pressed="${!S.cat}" data-cat="">Tout</button>${cats.map(c => `<button aria-pressed="${S.cat === c}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
+    <div class="tiles" id="plist"></div>
+    <div id="bar-space"></div>`;
   const q = $('#q');
   const sc = $('#scan'); if (sc) sc.onclick = scanToCart;
   const gc = $('#go-cash'); if (gc) gc.onclick = () => { S.tab = 'cash'; draw(); };
@@ -1002,19 +1044,32 @@ function viewSale() {
     if (hit) { addToCart(hit.id); S.q = ''; q.value = ''; drawProducts(); }
     else toast('Aucun produit avec ce code.', true);
   };
+  document.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { S.cat = b.dataset.cat; viewSale(); });
   const li = $('#last-inv'); if (li) li.onclick = () => S.last.rec ? openInvoice(recToSale(S.last.rec)) : openInvoice(S.last.id);
   const lx = $('#last-x'); if (lx) lx.onclick = () => { S.last = null; viewSale(); };
   drawProducts(); drawCart();
 }
 
+// Couleur et lettres de la tuile : même couleur pour une même catégorie.
+const TILE_COLORS = [['#E3F1E8', '#1f6b4a'], ['#E8EEF8', '#2F5DA8'], ['#FBF1D6', '#8A6100'], ['#F7E6E3', '#B42318'], ['#EEE8F6', '#6941C6'], ['#E2F2F4', '#0E6874'], ['#F6E8DA', '#8A4B12']];
+function tileColor(key) {
+  let h = 0; for (const ch of String(key || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return TILE_COLORS[h % TILE_COLORS.length];
+}
+const initials = n => { const w = String(n).replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  return ((w[0] || '?').slice(0, w.length > 1 ? 1 : 2) + (w.length > 1 ? (/\d/.test(w[1]) ? w[1].slice(0, 2) : w[1][0]) : '')).toUpperCase(); };
+
 function drawProducts() {
   const t = S.q.trim().toLowerCase();
-  const list = S.products.filter(p => !t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t).slice(0, 60);
-  $('#plist').innerHTML = list.length ? list.map(p => `
-    <button class="prod" data-add="${esc(p.id)}" ${Number(p.stock_qty) <= 0 && !S.offline ? 'disabled' : ''}>
-      <span><span class="nm">${esc(p.name)}</span><br><span class="sub">${qty(p.stock_qty)} ${esc(UNITS[p.unit])} en stock</span></span>
-      <span class="pr">${money(p.sell_price)}</span>
-    </button>`).join('') : '<p class="empty">Aucun produit trouvé.</p>';
+  const list = S.products.filter(p => (!S.cat || p.category === S.cat) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t)).slice(0, 90);
+  $('#plist').innerHTML = list.length ? list.map(p => {
+    const [bg, fg] = tileColor(p.category || p.name), inCart = S.cart.get(p.id), out = Number(p.stock_qty) <= 0;
+    return `<button class="tile${inCart ? ' in' : ''}" data-add="${esc(p.id)}" ${out && !S.offline ? 'disabled' : ''} aria-label="${esc(p.name)}, ${esc(money(p.sell_price))}${inCart ? ', ' + esc(qty(inCart)) + ' dans le panier' : ''}">
+      <span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>
+      <span class="tn">${esc(p.name)}</span>
+      ${out ? '<span class="ts">Épuisé</span>' : `<span class="tp">${esc(fmtNum.format(p.sell_price))}</span>`}
+      ${inCart ? `<span class="tq" aria-hidden="true">${esc(qty(inCart))}</span>` : ''}</button>`;
+  }).join('') : '<p class="empty" style="grid-column:1/-1">Aucun produit trouvé.</p>';
   document.querySelectorAll('[data-add]').forEach(b => b.onclick = () => addToCart(b.dataset.add));
 }
 
@@ -1026,6 +1081,8 @@ function addToCart(id) {
     toast('Attention : stock peut-être insuffisant pour ' + p.name + ' (à vérifier).', true);
   }
   S.cart.set(id, cur + 1);
+  try { navigator.vibrate && navigator.vibrate(25); } catch (e) {}
+  if ($('#plist') && !S.payOpen) drawProducts();
   drawCart();
 }
 
@@ -1050,78 +1107,157 @@ function discError(sub, d) {
   return '';
 }
 
-function drawCart() {
-  const el = $('#cart'); if (!el) return;
-  if (!S.cart.size) { el.innerHTML = '<h2>Panier</h2><p class="empty">Touchez un produit pour l\'ajouter.</p>'; return; }
+// Montants du paiement, calculés à partir de l'état (rien n'est perdu quand l'écran se redessine).
+// paid = argent réellement reçu maintenant ; la base prend d'abord l'avance du client pour le reste.
+function payFigures() {
   const sub = cartTotal();
   if (S.disc > sub) S.disc = 0;
-  const total = sub - S.disc;
-  const canDisc = S.role === 'owner' || (S.shop.discMax || 0) > 0;
+  const total = sub - (S.disc || 0);
   const adv = S.offline ? 0 : advOf(S.custSel);
-  // Client avec une avance : par défaut, la vente est prise sur son avance (rien à encaisser).
   const useAdv = adv > 0 && !S.custSel.noAdv && !S.editQuote;
-  const advPart = t => useAdv ? Math.min(adv, t) : 0;
+  const advPart = useAdv ? Math.min(adv, total) : 0, due = total - advPart;
+  const mode = S.payMode || 'cash';
+  let paid = due, change = 0, recv = null;
+  if (mode === 'cash') {
+    recv = S.recv === '' || S.recv == null ? due : Math.max(0, Math.round(Number(S.recv) || 0));
+    paid = Math.min(recv, due); change = Math.max(0, recv - due);
+  } else if (mode === 'credit') {
+    paid = Math.min(due, Math.max(0, Math.round(Number(S.paidNow) || 0)));
+  }
+  return { sub, total, adv, useAdv, advPart, due, mode, paid, change, recv, method: mode === 'mobile_money' ? 'mobile_money' : 'cash' };
+}
+
+// Écran Vendre : barre fixe en bas (articles + total + « Payer »).
+function drawCart() {
+  if (S.payOpen) return S.cart.size ? viewPay() : (S.payOpen = false, viewSale());
+  let bar = document.getElementById('cartbar');
+  if (!S.cart.size || !$('#plist')) { if (bar) bar.remove(); const sp = $('#bar-space'); if (sp) sp.style.height = '0'; return; }
+  if (!bar) { bar = document.createElement('div'); bar.id = 'cartbar'; bar.className = 'cartbar'; $('#view').appendChild(bar); }
+  const f = payFigures(), n = [...S.cart.values()].reduce((a, q) => a + (Number.isInteger(q) ? q : 1), 0);
+  bar.innerHTML = `<button type="button" id="open-pay"><span class="ct"><small>${n} article${n > 1 ? 's' : ''}${S.editQuote ? ' · devis ' + esc(quoteNo(S.editQuote.no)) : ''}</small><b>${esc(money(f.total))}</b></span>
+    <span class="go">${S.editQuote ? 'Devis ›' : 'Payer ›'}</span></button>`;
+  const tabs = document.querySelector('.tabs');
+  bar.style.bottom = (tabs ? tabs.offsetHeight : 0) + 'px';
+  const sp = $('#bar-space'); if (sp) sp.style.height = '84px';
+  $('#open-pay').onclick = () => { S.payOpen = true; window.scrollTo(0, 0); viewPay(); };
+}
+
+// Écran Payer : lignes du panier, client, mode de paiement, monnaie à rendre, Valider.
+function viewPay() {
+  S.payOpen = true;
+  const bar = document.getElementById('cartbar'); if (bar) bar.remove();
+  const f = payFigures(), canDisc = S.role === 'owner' || (S.shop.discMax || 0) > 0, eq = S.editQuote;
   const lines = [...S.cart].map(([id, q]) => {
     const p = S.products.find(x => x.id === id);
-    return `<div class="cartline">
-      <div><div class="nm" style="font-weight:600;overflow-wrap:anywhere">${esc(p.name)}</div><div class="sub muted num">${money(p.sell_price)} / ${esc(UNITS[p.unit])}</div></div>
-      <input type="number" inputmode="decimal" min="0" step="${WHOLE.includes(p.unit) ? 1 : 0.001}" value="${esc(q)}" data-qty="${esc(id)}" aria-label="Quantité ${esc(p.name)}">
-      <button class="btn ghost small" data-rm="${esc(id)}" aria-label="Retirer ${esc(p.name)}">Retirer</button>
-    </div>`;
+    return `<div class="pline"><div><div class="nm">${esc(p.name)}</div><div class="muted num" style="font-size:13px">${esc(money(p.sell_price))} / ${esc(UNITS[p.unit])}</div></div>
+      <div class="num" style="font-weight:700;text-align:right">${esc(money(Math.round(q * p.sell_price)))}</div>
+      <div class="step"><button type="button" data-minus="${esc(id)}" aria-label="Un de moins : ${esc(p.name)}">−</button>
+        <input type="number" inputmode="decimal" min="0" step="${WHOLE.includes(p.unit) ? 1 : 0.001}" value="${esc(q)}" data-qty="${esc(id)}" aria-label="Quantité ${esc(p.name)}">
+        <button type="button" data-plus="${esc(id)}" aria-label="Un de plus : ${esc(p.name)}">+</button></div>
+      <button class="btn ghost small" data-rm="${esc(id)}" style="justify-self:end">Retirer</button></div>`;
   }).join('');
-  el.innerHTML = `<h2>${S.editQuote ? 'Modifier le devis ' + esc(quoteNo(S.editQuote.no)) : 'Panier'}</h2>${lines}
-    ${canDisc ? `<div class="row" style="align-items:flex-end">
-      <label>Remise (FCFA)<input id="disc" type="number" inputmode="numeric" min="0" step="1" value="${S.disc || ''}" placeholder="0"></label>
-      <div class="muted" id="disc-info" style="font-size:13px;padding-bottom:12px">${discInfo(sub)}</div></div>` : ''}
-    <div class="total"><span>Total</span><span class="num" id="total">${money(total)}</span></div>
-    ${S.editQuote ? '' : `<div class="row">
-      <label>Montant encaissé (FCFA)<input id="paid" type="number" inputmode="numeric" min="0" step="1" value="${total - advPart(total)}"></label>
-      <label>Paiement<select id="pay">${Object.entries(PAY).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
-    </div>`}
-    <div class="row" style="align-items:center;flex-wrap:nowrap"><div style="flex:1 1 auto;min-width:0">
-      <div class="muted" style="font-size:13px">${S.editQuote ? 'Client du devis' : 'Client (obligatoire pour un crédit ou une avance)'}</div>
-      <div id="cust-sel" style="font-weight:600">${S.custSel ? esc(S.custSel.name) + ' <span class="muted" style="font-weight:400">' + esc(S.custSel.phone || '') + '</span>' : '<span class="muted" style="font-weight:400">aucun</span>'}</div></div>
-      <button class="btn ghost small" type="button" id="cust-pick" style="flex:0 0 auto">${S.custSel ? 'Changer' : 'Choisir'}</button></div>
-    ${adv && !S.editQuote ? `<div class="banner ${useAdv ? 'ok' : ''}" id="adv-box" style="display:grid;gap:6px">
-      <div>Avance de ${esc(S.custSel.name)} : <b>${money(adv)}</b></div>
-      <div id="adv-info">${useAdv ? advText(total, adv) : 'L\'avance n\'est pas utilisée : le client paie cette vente.'}</div>
-      <button class="btn small ghost" type="button" id="use-adv">${useAdv ? 'Le client paie en argent (garder l\'avance)' : 'Prendre sur l\'avance'}</button></div>` : ''}
-    ${S.editQuote ? `<div class="row"><button class="btn" id="q-save" ${canWrite() ? '' : 'disabled'}>Enregistrer le devis ${esc(quoteNo(S.editQuote.no))}</button>
-      <button class="btn ghost" id="q-drop">Abandonner</button></div>`
-    : `<div class="row"><button class="btn" id="validate" ${canWrite() || canSellOffline() ? '' : 'disabled'}>${S.offline ? 'Valider (hors ligne)' : 'Valider la vente'}</button>
-      ${S.offline ? '' : `<button class="btn ghost" id="mk-quote" ${canWrite() ? '' : 'disabled'}>Faire un devis</button>`}
-      <button class="btn ghost" id="clear">Vider</button></div>`}`;
-  el.querySelectorAll('[data-qty]').forEach(i => i.onchange = () => {
+  const quick = [...new Set([1000, 5000, 10000].map(st => Math.ceil(f.due / st) * st).filter(v => v > f.due))].slice(0, 2);
+  const M = [['cash', '💵', 'Espèces'], ['mobile_money', '📱', 'Mobile'], ['credit', '📒', 'Crédit']];
+  $('#view').innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="pay-back" style="flex:0 0 auto">‹ Produits</button>
+      <h2 style="flex:1 1 auto">${eq ? 'Devis ' + esc(quoteNo(eq.no)) : 'Panier'}</h2></div>
+    <section class="card" style="padding-block:4px">${lines}
+      ${canDisc ? (S.disc || S.showDisc ? `<div class="row" style="align-items:flex-end;padding-top:10px">
+        <label>Remise (FCFA)<input id="disc" type="number" inputmode="numeric" min="0" step="1" value="${S.disc || ''}" placeholder="0"></label>
+        <div class="muted" id="disc-info" style="font-size:13px;padding-bottom:12px">${discInfo(f.sub)}</div></div>`
+        : '<div style="padding-top:10px"><button class="btn ghost small" id="show-disc">+ Remise</button></div>') : ''}
+      <div style="padding-block:12px 8px"><div class="muted" style="text-align:center;font-size:13px">Total</div><div class="bigtotal" id="total">${esc(money(f.total))}</div></div></section>
+    <section class="card stack">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:22px" aria-hidden="true">👤</span>
+        <div style="flex:1 1 auto;min-width:0"><div class="muted" style="font-size:12.5px">Client</div>
+        <div id="cust-sel" style="font-weight:600">${S.custSel ? esc(S.custSel.name) + ' <span class="muted" style="font-weight:400">' + esc(S.custSel.phone || '') + '</span>' : '<span class="muted" style="font-weight:400">aucun (facultatif)</span>'}</div></div>
+        <button class="btn ghost small" type="button" id="cust-pick" style="flex:0 0 auto">${S.custSel ? 'Changer' : 'Choisir'}</button></div>
+      ${f.adv && !eq ? `<div class="banner ${f.useAdv ? 'ok' : ''}" id="adv-box" style="display:grid;gap:6px;margin:0">
+        <div>Avance de ${esc(S.custSel.name)} : <b>${money(f.adv)}</b></div>
+        <div id="adv-info">${f.useAdv ? advText(f.total, f.adv) : 'L\'avance n\'est pas utilisée : le client paie cette vente.'}</div>
+        <button class="btn small ghost" type="button" id="use-adv">${f.useAdv ? 'Le client paie en argent (garder l\'avance)' : 'Prendre sur l\'avance'}</button></div>` : ''}
+    </section>
+    ${eq ? `<button class="btn huge" id="q-save" ${canWrite() ? '' : 'disabled'}>Enregistrer le devis</button>
+      <button class="btn ghost" id="q-drop">Abandonner la modification</button>` : `
+    ${f.due > 0 ? `<section class="card stack">
+      <div class="modes" role="group" aria-label="Mode de paiement">${M.map(([k, ic, l]) => `<button type="button" data-mode="${k}" aria-pressed="${f.mode === k}"><span class="mi" aria-hidden="true">${ic}</span>${l}</button>`).join('')}</div>
+      ${f.mode === 'cash' ? `<label>Argent reçu du client (FCFA)<input id="recv" type="number" inputmode="numeric" min="0" step="5" value="${esc(S.recv ?? '')}" placeholder="${esc(f.due)}" style="font-size:20px;font-weight:700;height:54px"></label>
+        <div class="quick"><button type="button" data-q="${f.due}">Juste</button>${quick.map(v => `<button type="button" data-q="${v}">${esc(fmtNum.format(v))}</button>`).join('')}</div>
+        <div id="pay-info">${payInfo(f)}</div>`
+      : f.mode === 'mobile_money' ? `<p class="muted" style="margin:0">Vérifiez le message Mobile Money reçu (montant : <b>${esc(money(f.due))}</b>) avant de valider.</p>`
+      : `<label>Payé maintenant (FCFA, 0 si rien)<input id="paidnow" type="number" inputmode="numeric" min="0" step="5" value="${esc(S.paidNow || '')}" placeholder="0" style="font-size:20px;font-weight:700;height:54px"></label>
+        <div id="pay-info">${payInfo(f)}</div>`}
+    </section>` : ''}
+    <button class="btn huge" id="validate" ${canWrite() || canSellOffline() ? '' : 'disabled'}>✓ ${S.offline ? 'Valider (hors ligne)' : 'Valider la vente'}</button>
+    <div class="row">${S.offline ? '' : `<button class="btn ghost" id="mk-quote" ${canWrite() ? '' : 'disabled'}>Faire un devis</button>`}
+      <button class="btn ghost" id="clear">Vider le panier</button></div>`}
+    <input type="hidden" id="paid" value="${f.paid}"><input type="hidden" id="pay" value="${f.method}">`;
+  const redraw = () => viewPay();
+  $('#pay-back').onclick = () => { S.payOpen = false; viewSale(); };
+  document.querySelectorAll('[data-qty]').forEach(i => i.onchange = () => {
     const v = Number(i.value);
-    if (!(v > 0)) S.cart.delete(i.dataset.qty); else S.cart.set(i.dataset.qty, v);
+    if (!(v > 0)) S.cart.delete(i.dataset.qty); else setQty(i.dataset.qty, v);
     drawCart();
   });
-  el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.cart.delete(b.dataset.rm); drawCart(); });
-  const cl = $('#clear'); if (cl) cl.onclick = () => { S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; drawCart(); };
-  $('#cust-pick').onclick = pickCustomer;
+  document.querySelectorAll('[data-plus]').forEach(b => b.onclick = () => { setQty(b.dataset.plus, (S.cart.get(b.dataset.plus) || 0) + 1); drawCart(); });
+  document.querySelectorAll('[data-minus]').forEach(b => b.onclick = () => { const v = (S.cart.get(b.dataset.minus) || 0) - 1;
+    if (v > 0) S.cart.set(b.dataset.minus, v); else S.cart.delete(b.dataset.minus); drawCart(); });
+  document.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.cart.delete(b.dataset.rm); drawCart(); });
+  const sd = $('#show-disc'); if (sd) sd.onclick = () => { S.showDisc = true; redraw(); setTimeout(() => $('#disc') && $('#disc').focus(), 0); };
   const di = $('#disc');
   if (di) di.oninput = () => {
-    const v = Math.round(Number(di.value) || 0);
-    S.disc = v > 0 ? v : 0;
-    const t = sub - Math.min(S.disc, sub);
-    $('#total').textContent = money(t); if ($('#paid')) $('#paid').value = t - advPart(t); $('#disc-info').innerHTML = discInfo(sub);
-    if (useAdv && $('#adv-info')) $('#adv-info').innerHTML = advText(t, adv);
+    const v = Math.round(Number(di.value) || 0); S.disc = v > 0 ? v : 0;
+    const g = payFigures(); $('#total').textContent = money(g.total); $('#disc-info').innerHTML = discInfo(g.sub);
+    if ($('#adv-info') && g.useAdv) $('#adv-info').innerHTML = advText(g.total, g.adv);
+    syncPay();
   };
-  const ua = $('#use-adv');
-  if (ua) ua.onclick = () => { S.custSel.noAdv = useAdv; drawCart(); };
+  $('#cust-pick').onclick = pickCustomer;
+  const ua = $('#use-adv'); if (ua) ua.onclick = () => { S.custSel.noAdv = f.useAdv; redraw(); };
+  document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+    S.payMode = b.dataset.mode;
+    if (S.payMode === 'credit' && !S.custSel) { redraw(); return pickCustomer(); }
+    redraw();
+  });
+  const rv = $('#recv'); if (rv) rv.oninput = () => { S.recv = rv.value; syncPay(); };
+  document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { S.recv = b.dataset.q; rv.value = b.dataset.q; syncPay(); });
+  const pn = $('#paidnow'); if (pn) pn.oninput = () => { S.paidNow = pn.value; syncPay(); };
   const v = $('#validate'); if (v) v.onclick = submitSale;
   const mq = $('#mk-quote'); if (mq) mq.onclick = () => saveQuote(null);
   const qs = $('#q-save'); if (qs) qs.onclick = () => saveQuote(S.editQuote.id);
-  const qd = $('#q-drop'); if (qd) qd.onclick = () => { S.editQuote = null; S.cart.clear(); S.disc = 0; S.custSel = null; S.ref = uuid(); drawCart(); };
+  const qd = $('#q-drop'); if (qd) qd.onclick = () => { S.editQuote = null; resetSale(); viewSale(); };
+  const cl = $('#clear'); if (cl) cl.onclick = () => {
+    if (!cl.dataset.sure) { cl.dataset.sure = '1'; cl.textContent = 'Confirmer : vider'; return; }
+    resetSale(); viewSale();
+  };
+}
+function setQty(id, v) {
+  const p = S.products.find(x => x.id === id);
+  if (p && v > Number(p.stock_qty) && !S.offline) { toast('Stock insuffisant : ' + p.name + ' (' + qty(p.stock_qty) + ' en stock)', true); v = Math.max(0, Number(p.stock_qty)); }
+  if (v > 0) S.cart.set(id, v); else S.cart.delete(id);
+}
+function resetSale() {
+  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.payOpen = false; S.payMode = 'cash'; S.recv = ''; S.paidNow = ''; S.showDisc = false;
+  const bar = document.getElementById('cartbar'); if (bar) bar.remove();
+}
+// Texte sous le montant : monnaie à rendre, ou ce qui reste en crédit.
+function payInfo(f) {
+  if (f.mode === 'cash' && f.change > 0) return `<div class="change"><span>À rendre</span><b>${esc(money(f.change))}</b></div>`;
+  if (f.paid < f.due && f.mode === 'credit') return `<div class="banner" style="margin:0">Crédit : <b>${esc(money(f.due - f.paid))}</b>${S.custSel ? ' pour ' + esc(S.custSel.name) : ' (choisissez le client)'}.</div>`;
+  if (f.paid < f.due) return `<div class="banner bad" style="margin:0">Pas assez : il manque <b>${esc(money(f.due - f.paid))}</b>${S.custSel ? ' (crédit pour ' + esc(S.custSel.name) + ')' : ''}.</div>`;
+  return f.mode === 'cash' ? '<div class="banner ok" style="margin:0">Compte juste ✓</div>' : '';
+}
+function syncPay() {
+  const f = payFigures();
+  if ($('#paid')) $('#paid').value = f.paid;
+  if ($('#pay')) $('#pay').value = f.method;
+  if ($('#pay-info')) $('#pay-info').innerHTML = payInfo(f);
 }
 
 async function submitSale() {
   if (S.busy) return;
   S.busy = true; const b = $('#validate'); b.disabled = true; b.textContent = 'Enregistrement…';
-  const sub = cartTotal(), disc = S.disc || 0, total = sub - disc;
-  const paidRaw = $('#paid').value.trim();
-  const paid = paidRaw === '' ? total : Math.round(Number(paidRaw));
-  const pay = $('#pay').value, customer = S.custSel;
+  const F = payFigures(), sub = F.sub, disc = S.disc || 0, total = F.total;
+  const paid = F.paid, pay = F.method, customer = S.custSel, change = F.change;
   if (paid < total) {
     if (!customer) { S.busy = false; toast('Vente à crédit : choisissez le client (avec son téléphone).', true); return drawCart(); }
     const adv = S.offline ? 0 : advOf(customer);
@@ -1133,6 +1269,7 @@ async function submitSale() {
   }
   const dErr = discError(sub, disc);
   if (dErr) { S.busy = false; toast(dErr, true); return drawCart(); }
+  S.pendingChange = change;
   if (S.offline) { S.busy = false; return queueSale(total, paid, pay, customer, disc); }
   // Le propriétaire a peut-être changé un prix depuis l'ouverture de l'écran : on vérifie AVANT
   // d'encaisser, pour que le total affiché soit toujours le vrai total.
@@ -1160,7 +1297,7 @@ async function submitSale() {
   // avec la MÊME référence. Si le serveur l'avait déjà reçue, il ne la comptera pas deux fois.
   if (error && isNetErr(error) && offlineRight()) return queueSale(total, paid, pay, customer, disc);
   if (error) { toast(cleanErr(error), true); return drawCart(); }
-  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.customers = null; S.sales = null; S.summary = null; S.last = newSale ? { id: newSale, total } : null;
+  resetSale(); S.customers = null; S.sales = null; S.summary = null; S.last = newSale ? { id: newSale, total, change } : null;
   toast('Vente enregistrée : ' + money(total));
   await loadProducts();
   viewSale();
@@ -1925,8 +2062,8 @@ async function saveQuote(qid) {
     p_customer_id: S.custSel ? S.custSel.id : null, p_quote: qid });
   S.busy = false;
   if (error) return toast(cleanErr(error), true);
-  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null;
-  drawCart();
+  resetSale(); S.editQuote = null; S.quotes = null;
+  if (S.tab === 'sale') viewSale();
   toast(`Devis ${quoteNo(data.quote_no)} enregistré : ${money(data.total)}.`);
   quoteSheet(data.id);
 }
@@ -1997,7 +2134,7 @@ async function quoteSheet(id) {
     S.disc = q.discount || 0;
     S.custSel = null;
     if (q.customer_id) { const c = (await loadCustomers()).find(x => x.id === q.customer_id); if (c) S.custSel = { id: c.id, name: c.name, phone: c.phone, balance: c.balance }; }
-    S.editQuote = { id: q.id, no: q.quote_no };
+    S.editQuote = { id: q.id, no: q.quote_no }; S.payOpen = true;
     closeSheet(); S.tab = 'sale'; draw();
     toast(q.expired ? 'Devis expiré : les prix du jour seront repris et il sera valable 15 jours de plus.' : 'Les prix du devis sont gardés. Modifiez puis enregistrez.');
   };
