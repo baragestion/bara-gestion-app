@@ -211,7 +211,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26g';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-26h';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -605,10 +605,11 @@ function bindOfflineAdmin() {
      avec le mot de passe, on retrouve son code et son empreinte. Le code n'est effacé qu'après
      « code oublié » ou 5 codes faux.
    - Empreinte digitale : en option, si le propriétaire la permet. Elle passe par le lecteur du
-     téléphone (WebAuthn) : l'empreinte elle-même ne quitte jamais le téléphone.
+     téléphone (WebAuthn) : l'empreinte elle-même ne quitte jamais le téléphone. Elle est demandée
+     dès que l'écran de verrouillage s'affiche ; une fois par semaine, c'est le code qui est demandé.
    Limite honnête : c'est un verrou d'écran contre une personne qui prend le téléphone ; il ne
    remplace pas le mot de passe ni les contrôles faits par la base. */
-const PIN_KEY = 'bg_pin_v2', PIN_ITER = 150000, PIN_MAX_FAILS = 5;
+const PIN_KEY = 'bg_pin_v2', PIN_ITER = 150000, PIN_MAX_FAILS = 5, PIN_WEEK_MS = 7 * 24 * 3600 * 1000;
 const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const unb64 = str => Uint8Array.from(atob(str), c => c.charCodeAt(0));
 // Un code par compte : { idDuCompte: { salt, hash, it, fails, bio } }.
@@ -722,7 +723,7 @@ function pinSetup(change) {
       if (v !== first) { first = null; step(); setTimeout(() => toast('Les deux codes sont différents. Recommencez.', true), 0); return; }
       const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
       const old = pinRec();
-      savePinRec({ u: S.user.id, salt, it: PIN_ITER, hash: await pinHash(v, salt, PIN_ITER), fails: 0, bio: old ? old.bio || null : null });
+      savePinRec({ u: S.user.id, salt, it: PIN_ITER, hash: await pinHash(v, salt, PIN_ITER), fails: 0, bio: old ? old.bio || null : null, lastPin: Date.now() });
       unlockDone();
       toast(change ? 'Code d\'accès changé.' : 'Code d\'accès créé. Il sera demandé à chaque ouverture.');
     }
@@ -737,15 +738,19 @@ async function lock() {
   if (!rec) { S.unlocked = false; return gate(); }
   S.unlocked = false; stopScan();
   const h = lockHost(); h.innerHTML = '<div class="lock"></div>';
-  const bio = rec.bio && bioAllowed() && await bioAvailable();
+  // Une fois par semaine, le code est demandé même avec l'empreinte, pour ne pas l'oublier.
+  if (!rec.lastPin) { rec.lastPin = Date.now(); savePinRec(rec); }
+  const weekly = Date.now() - rec.lastPin > PIN_WEEK_MS;
+  const bio = rec.bio && !weekly && bioAllowed() && await bioAvailable();
   if (S.unlocked || !S.user) return;
   pinPad(h, {
     title: 'Tapez votre code', max: 6,
-    extra: `${bio ? '<button class="btn" type="button" id="pin-bio">Ouvrir avec l\'empreinte</button>' : ''}
+    sub: rec.bio && weekly && bioAllowed() ? 'Une fois par semaine, l\'application demande votre code pour que vous ne l\'oubliiez pas. Ensuite, l\'empreinte revient.' : '',
+    extra: `${bio ? '<button class="btn" type="button" id="pin-bio">👆 Ouvrir avec l\'empreinte</button>' : ''}
       <button class="btn ghost small" type="button" id="pin-forgot">Code oublié ? Se reconnecter avec le mot de passe</button>`,
     onDone: async (v, msg) => {
       const r = pinRec(); if (!r) { S.unlocked = false; return gate(); }
-      if (await pinHash(v, r.salt, r.it || PIN_ITER) === r.hash) { r.fails = 0; savePinRec(r); unlockDone(); return; }
+      if (await pinHash(v, r.salt, r.it || PIN_ITER) === r.hash) { r.fails = 0; r.lastPin = Date.now(); savePinRec(r); unlockDone(); return; }
       r.fails = (r.fails || 0) + 1; savePinRec(r);
       if (r.fails >= PIN_MAX_FAILS) { clearPin(); dropLock(); return leave('5 codes faux : par sécurité, reconnectez-vous avec votre mot de passe.'); }
       msg(`Code faux. Encore ${PIN_MAX_FAILS - r.fails} essai(s) avant la déconnexion.`, true);
@@ -756,11 +761,19 @@ async function lock() {
     if (!fg.dataset.sure) { fg.dataset.sure = '1'; fg.textContent = myQueue().length ? 'Confirmer (les ventes non envoyées restent gardées)' : 'Confirmer : se déconnecter'; return; }
     clearPin(); dropLock(); leave();
   };
-  const bb = $('#pin-bio'); if (bb) bb.onclick = () => bioUnlock();
+  const bb = $('#pin-bio');
+  if (bb) {
+    bb.onclick = () => bioUnlock(false);
+    // L'empreinte est demandée tout de suite ; si elle échoue ou si on annule, le pavé reste là.
+    const auto = () => { if (!S.unlocked && document.getElementById('pin-bio')) bioUnlock(true); };
+    if (document.visibilityState === 'visible') setTimeout(auto, 250);
+    else document.addEventListener('visibilitychange', function v() { if (document.visibilityState === 'visible') { document.removeEventListener('visibilitychange', v); setTimeout(auto, 250); } });
+  }
 }
 
-async function bioUnlock() {
-  const r = pinRec(); if (!r || !r.bio) return;
+async function bioUnlock(auto) {
+  const r = pinRec(); if (!r || !r.bio || S.bioBusy) return;
+  S.bioBusy = true;
   try {
     const cred = await navigator.credentials.get({ publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)), timeout: 60000, userVerification: 'required',
@@ -769,9 +782,9 @@ async function bioUnlock() {
     if (!(flags & 4)) throw new Error('uv');                 // le téléphone doit avoir vérifié l'empreinte (ou son propre code)
     r.fails = 0; savePinRec(r); unlockDone();
   } catch (e) {
-    if (e && e.name === 'NotAllowedError') return;          // annulé par la personne
+    if (e && e.name === 'NotAllowedError') { if (!auto) toast('Empreinte annulée : tapez votre code.'); return; }   // annulé ou non reconnu
     toast('Empreinte non reconnue : tapez votre code.', true);
-  }
+  } finally { S.bioBusy = false; }
 }
 
 async function bioEnroll() {
