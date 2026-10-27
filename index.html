@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-26q';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-27a';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -280,7 +280,7 @@ function toast(msg, err) {
 const S = {
   user: null, memberships: [], shop: null, role: null, sub: null,
   products: [], costs: {}, tab: 'sale',
-  q: '', cart: new Map(), ref: uuid(), busy: false,
+  q: '', cart: new Map(), cartUnits: new Map(), units: [], ref: uuid(), busy: false,
   sales: null, summary: null, range: 'today', sheet: null, team: null, last: null, names: null, kick: null, checking: false, offline: false, cachedAt: 0, syncing: false, customers: null, custSel: null, creditMap: null, cash: null, count: null, countPending: false, disc: 0, discMap: null, alertCount: 0, alerts: null, devices: null, offAllowed: null
 };
 const isManager = () => S.role === 'owner' || S.role === 'manager';
@@ -304,7 +304,9 @@ function saveCache() {
       customers: canCredit() && S.customers ? S.customers.filter(c => c.active !== false && c.phone)
         .map(c => ({ id: c.id, name: c.name, phone: c.phone, balance: c.balance, active: true })) : [],
       products: S.products.map(p => ({ id: p.id, name: p.name, category: p.category, unit: p.unit,
-        sell_price: p.sell_price, stock_qty: p.stock_qty, alert_threshold: p.alert_threshold, barcode: p.barcode }))
+        sell_price: p.sell_price, stock_qty: p.stock_qty, alert_threshold: p.alert_threshold, barcode: p.barcode, track_kind: p.track_kind || null })),
+      // Appareils en stock (numéro, couleur, garantie) : pour vendre par scan sans réseau.
+      units: (S.units || []).map(u => ({ product_id: u.product_id, serial: u.serial, serial2: u.serial2 || null, color: u.color || null, warranty_months: u.warranty_months || 0 }))
     }));
   } catch (e) {}
 }
@@ -327,8 +329,8 @@ const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|Load fa
 function startOffline(c) {
   S.offline = true; S.user = { id: c.userId }; S.role = c.role; S.shop = { ...c.shop };
   S.memberships = [{ shop_id: c.shop.id, role: c.role, display_name: c.shop.who, shops: { name: c.shop.name } }];
-  S.products = c.products; S.costs = {}; S.sub = { status: 'offline' }; S.cachedAt = c.savedAt;
-  S.cart = new Map(); S.ref = uuid(); S.last = null; S.editQuote = null; S.quotes = null; S.sales = null; S.summary = null; S.team = null; S.tab = 'sale';
+  S.products = c.products; S.units = Array.isArray(c.units) ? c.units : []; S.costs = {}; S.sub = { status: 'offline' }; S.cachedAt = c.savedAt;
+  S.cart = new Map(); S.cartUnits = new Map(); S.ref = uuid(); S.last = null; S.editQuote = null; S.quotes = null; S.sales = null; S.summary = null; S.team = null; S.tab = 'sale';
   gate();
   draw();
   // Le signal « réseau revenu » arrive parfois avant que la connexion soit utilisable : on réessaie.
@@ -406,7 +408,9 @@ function queueSale(total, paid, pay, customer, disc = 0) {
   if (paid < total && !customer) { toast('Vente à crédit : choisissez le client.', true); return drawCart(); }
   const items = [...S.cart].map(([id, q]) => {
     const p = S.products.find(x => x.id === id);
-    return { product_id: id, quantity: q, unit_price: Number(p.sell_price), name: p.name, unit: p.unit };
+    const units = S.cartUnits.get(id);
+    return { product_id: id, quantity: q, unit_price: Number(p.sell_price), name: p.name, unit: p.unit,
+      ...(units ? { serials: units.map(u => u.serial), units, track_kind: p.track_kind } : {}) };
   });
   let rec;
   try {
@@ -422,9 +426,11 @@ function queueSale(total, paid, pay, customer, disc = 0) {
   }
   // Stock affiché : on le baisse aussi sur le téléphone (la vraie valeur viendra du serveur).
   items.forEach(i => { const p = S.products.find(x => x.id === i.product_id); if (p) p.stock_qty = Number(p.stock_qty) - i.quantity; });
+  const sold = new Set(items.flatMap(i => i.serials || []));
+  S.units = (S.units || []).filter(u => !sold.has(u.serial));
   try {
     const c = JSON.parse(storage.getItem(CACHE_KEY) || 'null');
-    if (c && c.userId === S.user.id) { c.products = S.products.map(p => ({ ...p })); storage.setItem(CACHE_KEY, JSON.stringify(c)); }
+    if (c && c.userId === S.user.id) { c.products = S.products.map(p => ({ ...p })); c.units = (c.units || []).filter(u => !sold.has(u.serial)); storage.setItem(CACHE_KEY, JSON.stringify(c)); }
   } catch (e) {}
   resetSale(); S.last = { rec, total, change: S.pendingChange || 0 }; S.pendingChange = 0;
   toast('Vente gardée sur le téléphone : ' + money(total) + ' (réf. ' + rec.offline_ref + ')');
@@ -436,8 +442,9 @@ function queueSale(total, paid, pay, customer, disc = 0) {
 function recToSale(r) {
   return { invoice_no: null, offline_ref: r.offline_ref, created_at: r.created_at, client_created_at: r.created_at,
     created_by: r.user_id, customer_name: r.customer, payment_method: r.payment_method, total: r.total, paid: r.paid, discount: r.discount || 0,
-    sale_items: r.items.map(i => ({ quantity: i.quantity, unit_price: i.unit_price,
-      line_total: Math.round(i.quantity * i.unit_price), products: { name: i.name, unit: i.unit } })) };
+    sale_items: r.items.map(i => ({ quantity: i.quantity, unit_price: i.unit_price, product_id: i.product_id,
+      line_total: Math.round(i.quantity * i.unit_price), products: { name: i.name, unit: i.unit },
+      units: (i.units || []).map(u => ({ serial: u.serial, color: u.color, kind: i.track_kind, months: u.warranty_months })) })) };
 }
 
 // Envoi de la file : dans l'ordre, une vente à la fois, retirée seulement après confirmation.
@@ -451,7 +458,7 @@ async function syncQueue(manual) {
     if (stop) break;
     const { data, error } = await sb.rpc('sync_offline_sale', {
       p_shop: r.shop_id, p_device: r.device_id, p_offline_ref: r.offline_ref, p_client_ref: r.client_ref,
-      p_created_at: r.created_at, p_items: r.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price })),
+      p_created_at: r.created_at, p_items: r.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price, ...(i.serials ? { serials: i.serials } : {}) })),
       p_paid: r.paid, p_payment_method: r.payment_method, p_customer: r.customer_id ? null : r.customer,
       ...(r.discount ? { p_discount: r.discount } : {}), ...(r.customer_id ? { p_customer_id: r.customer_id } : {}) });
     const q = readQueue();
@@ -973,7 +980,7 @@ async function selectShop(id) {
     discMax: Number(m.discount_max_pct) || 0, creditAllowed: !!m.credit_allowed };
   S.role = m.role;
   storage.setItem('bg_shop', id);
-  S.cart = new Map(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = (m.role === 'owner' || m.role === 'manager') ? 'home' : 'sale';
+  S.cart = new Map(); S.cartUnits = new Map(); S.arr = null; S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = (m.role === 'owner' || m.role === 'manager') ? 'home' : 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
   await Promise.all([loadProducts().then(() => canCredit() ? loadCustomers(true) : null), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings()]);
   saveCache();
@@ -988,6 +995,9 @@ async function loadLockSettings() {
   try {
     const { data, error } = await sb.from('shops').select('lock_seconds, biometric_allowed').eq('id', S.shop.id).maybeSingle();
     if (!error && data) { S.shop.lockSec = Number(data.lock_seconds) || 60; S.shop.bioAllowed = data.biometric_allowed !== false; }
+    // Garantie proposée à l'arrivage des appareils (migration 016 ; aucune sinon).
+    const w = await sb.from('shops').select('default_warranty_months').eq('id', S.shop.id).maybeSingle();
+    S.shop.warranty = !w.error && w.data ? Number(w.data.default_warranty_months) || 0 : 0;
   } catch (e) {}
 }
 
@@ -997,11 +1007,14 @@ async function loadSub() {
 }
 
 async function loadProducts() {
-  const { data, error } = await sb.from('products')
-    .select('id,name,category,unit,sell_price,stock_qty,alert_threshold,barcode')
+  const cols = 'id,name,category,unit,sell_price,stock_qty,alert_threshold,barcode';
+  let { data, error } = await sb.from('products').select(cols + ',track_kind')
     .eq('shop_id', S.shop.id).eq('active', true).order('name');
+  // Avant la migration 016, la colonne track_kind n'existe pas : on lit sans elle.
+  if (error && /track_kind/.test(error.message || '')) ({ data, error } = await sb.from('products').select(cols).eq('shop_id', S.shop.id).eq('active', true).order('name'));
   if (error) return toast(cleanErr(error), true);
   S.products = data || [];
+  await loadUnits();
   saveCache();
   if (isManager()) {
     const c = await sb.from('product_costs').select('product_id,buy_price').eq('shop_id', S.shop.id);
@@ -1165,12 +1178,15 @@ function cartTotal() {
   return t;
 }
 
+// Rayons de la boutique : les téléphones d'abord, puis les autres par ordre alphabétique.
+function orderedCats() {
+  const FIRST = ['Smartphones', 'Téléphones simples', 'Tablettes', 'Ordinateurs'], rank = c => { const i = FIRST.indexOf(c); return i < 0 ? 99 : i; };
+  return [...new Set(S.products.map(p => p.category).filter(Boolean))].sort((x, y) => rank(x) - rank(y) || x.localeCompare(y, 'fr'));
+}
 function viewSale() {
   if (S.payOpen && S.cart.size) return viewPay();
   S.payOpen = false; document.body.classList.remove('paying');
-  const FIRST = ['Smartphones', 'Téléphones simples'];   // les téléphones d'abord, puis les autres rayons par ordre alphabétique
-  const rank = c => { const i = FIRST.indexOf(c); return i < 0 ? 99 : i; };
-  const cats = [...new Set(S.products.map(p => p.category).filter(Boolean))].sort((x, y) => rank(x) - rank(y) || x.localeCompare(y, 'fr'));
+  const cats = orderedCats();
   if (S.cat && !cats.includes(S.cat)) S.cat = '';
   $('#view').innerHTML = `${!S.offline && S.cash && !S.cash.open ? '<div class="banner">Caisse non ouverte. <button class="btn small" id="go-cash" style="margin-left:6px">Ouvrir la caisse</button></div>' : ''}
     ${S.last ? `<section class="card" style="display:grid;gap:8px;border-color:var(--accent)">
@@ -1191,10 +1207,8 @@ function viewSale() {
   q.onkeydown = ev => {
     if (ev.key !== 'Enter') return;
     ev.preventDefault();
-    const code = q.value.trim().toUpperCase();
-    const hit = S.products.find(p => p.barcode && p.barcode.toUpperCase() === code);
-    if (hit) { addToCart(hit.id); S.q = ''; q.value = ''; drawProducts(); }
-    else toast('Aucun produit avec ce code.', true);
+    if (!q.value.trim()) return;
+    if (sellByCode(q.value)) { S.q = ''; q.value = ''; drawProducts(); }
   };
   S.saleCats = cats;
   const li = $('#last-inv'); if (li) li.onclick = () => S.last.rec ? openInvoice(recToSale(S.last.rec)) : openInvoice(S.last.id);
@@ -1212,7 +1226,8 @@ function whoLine() {
 // Dessins des produits courants (faits pour Bara Gestion, sans droits d'auteur). Le nom du produit
 // choisit le dessin ; sinon, les initiales en couleur.
 const ART = [
-  [/t[ée]l[ée]phone|smartphone/i, '<rect x="20" y="6" width="24" height="52" rx="5" fill="#3B4A57" stroke="#1E2A33" stroke-width="2.5"/><rect x="24" y="12" width="16" height="36" rx="1.5" fill="#9FD3F0"/><circle cx="32" cy="53" r="2" fill="#9AA5AE"/>'],
+  [/ordinateur|laptop|macbook|\b(hp|dell|lenovo|acer|asus|toshiba)\b/i, '<rect x="12" y="12" width="40" height="28" rx="3" fill="#3B4A57" stroke="#1E2A33" stroke-width="2.5"/><rect x="16" y="16" width="32" height="20" rx="1" fill="#9FD3F0"/><path d="M6 44h52l-4 8H10Z" fill="#9AA5AE" stroke="#4E5D68" stroke-width="2.5" stroke-linejoin="round"/>'],
+  [/t[ée]l[ée]phone|smartphone|tablette/i, '<rect x="20" y="6" width="24" height="52" rx="5" fill="#3B4A57" stroke="#1E2A33" stroke-width="2.5"/><rect x="24" y="12" width="16" height="36" rx="1.5" fill="#9FD3F0"/><circle cx="32" cy="53" r="2" fill="#9AA5AE"/>'],
   [/pneu|chambre [àa] air|rustine/i, '<circle cx="32" cy="32" r="24" fill="#2E2E2E"/><circle cx="32" cy="32" r="12" fill="#F6F4EE" stroke="#9AA5AE" stroke-width="3"/><g stroke="#555" stroke-width="2"><path d="M32 8v6M32 50v6M8 32h6M50 32h6M15 15l4 4M45 45l4 4M49 15l-4 4M19 45l-4 4"/></g>'],
   [/cha[îi]ne/i, '<g fill="none" stroke="#5E6A73" stroke-width="4"><rect x="6" y="24" width="20" height="14" rx="7"/><rect x="22" y="24" width="20" height="14" rx="7"/><rect x="38" y="24" width="20" height="14" rx="7"/></g>'],
   [/cr[èe]me|lait de corps|pommade|vaseline|karit[ée]|parfum|d[ée]odorant|shampo|d[ée]frisant|gel coiffant|dentifrice/i, '<rect x="22" y="8" width="20" height="10" rx="2" fill="#E8A3B8" stroke="#8A3B55" stroke-width="2.5"/><path d="M18 18h28v34a4 4 0 0 1-4 4H22a4 4 0 0 1-4-4Z" fill="#FBE3EA" stroke="#8A3B55" stroke-width="2.5"/><rect x="22" y="30" width="20" height="10" rx="2" fill="#E8A3B8"/>'],
@@ -1236,7 +1251,7 @@ const ART = [
   [/pagne|tissu|chemise|t-?shirt|robe|pantalon|habit/i, '<path d="M22 10l-12 8 6 10 6-4v30h20V24l6 4 6-10-12-8q-4 6-10 6t-10-6Z" fill="#7FB2E5" stroke="#2F5DA8" stroke-width="2.5" stroke-linejoin="round"/>'],
   [/chaussure|sandale|basket/i, '<path d="M8 40q2-14 14-14l8 8q10 4 22 4 6 0 6 6v4H8Z" fill="#8A5A2B" stroke="#4E3418" stroke-width="2.5" stroke-linejoin="round"/>'],
 ];
-function artFor(name, cat) { const a = ART.find(([re]) => re.test(name || '')) || (/smartphone|t[ée]l[ée]phone/i.test(cat || '') ? ART[0] : null);
+function artFor(name, cat) { const a = ART.find(([re]) => re.test(name || '')) || (/ordinateur/i.test(cat || '') ? ART[0] : /smartphone|t[ée]l[ée]phone|tablette/i.test(cat || '') ? ART[1] : null);
   return a ? `<svg viewBox="0 0 64 64" width="46" height="46" aria-hidden="true">${a[1]}</svg>` : ''; }
 
 // Couleur et lettres de la tuile : même couleur pour une même catégorie.
@@ -1250,7 +1265,7 @@ const initials = n => { const w = String(n).replace(/[^\p{L}\p{N} ]/gu, ' ').tri
 
 // Rayons en grosses cases : avec beaucoup de produits, on choisit d'abord le rayon (ex. Smartphones,
 // Téléphones simples, Accessoires), puis le produit. La recherche et le scan cherchent partout.
-const FOLDER_IC = [[/smartphone/i, '📱'], [/t[ée]l[ée]phone|simple/i, '☎️'], [/accessoire/i, '🎧'], [/ciment|construction|ma[çc]onnerie/i, '🧱'],
+const FOLDER_IC = [[/ordinateur/i, '💻'], [/tablette/i, '📲'], [/smartphone/i, '📱'], [/t[ée]l[ée]phone|simple/i, '☎️'], [/accessoire/i, '🎧'], [/ciment|construction|ma[çc]onnerie/i, '🧱'],
   [/fer/i, '🔩'], [/t[ôo]le/i, '🏠'], [/peinture/i, '🎨'], [/plomberie/i, '🚰'], [/[ée]lectri/i, '💡'], [/outil/i, '🛠️'], [/bois/i, '🪵'], [/clou/i, '📌'],
   [/pagne/i, '🧵'], [/homme/i, '👔'], [/femme/i, '👗'], [/enfant/i, '🧒'], [/chaussure/i, '👟'], [/c[ée]r[ée]ale|riz/i, '🌾'], [/huile/i, '🫙'],
   [/boisson|lait/i, '🥤'], [/entretien|hygi[èe]ne/i, '🧼'], [/corps/i, '🧴'], [/cheveu/i, '💇'], [/maquillage/i, '💄'], [/moto/i, '🏍️'], [/v[ée]lo/i, '🚲']];
@@ -1287,6 +1302,7 @@ function drawProducts() {
 
 function addToCart(id) {
   const p = S.products.find(x => x.id === id); if (!p) return;
+  if (isTracked(p) && !S.editQuote) return unitPicker(id);   // appareil à numéro : on choisit LA boîte vendue (pas pour un devis)
   const cur = S.cart.get(id) || 0;
   if (cur + 1 > Number(p.stock_qty)) {
     if (!S.offline) return toast('Stock insuffisant : ' + p.name, true);
@@ -1360,7 +1376,13 @@ function viewPay() {
   const bar = document.getElementById('cartbar'); if (bar) bar.remove();
   const f = payFigures(), canDisc = S.role === 'owner' || (S.shop.discMax || 0) > 0, eq = S.editQuote;
   const lines = [...S.cart].map(([id, q]) => {
-    const p = S.products.find(x => x.id === id);
+    const p = S.products.find(x => x.id === id), units = S.cartUnits.get(id);
+    if (units) return `<div class="pline" style="grid-template-columns:minmax(0,1fr) auto"><div><div class="nm">${esc(p.name)}</div><div class="muted num" style="font-size:13px">${esc(String(units.length))} × ${esc(money(p.sell_price))}</div></div>
+      <div class="num" style="font-weight:700;text-align:right">${esc(money(units.length * p.sell_price))}</div>
+      ${units.map(u => `<div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:13.5px"><span aria-hidden="true">${devType(p.category) ? devType(p.category)[1] : '📱'}</span>
+        <span style="flex:1 1 auto;min-width:0">${esc(u.color || '')}${u.color ? ' · ' : ''}<span class="muted">${esc(codeName(p.track_kind))} ${esc(shortCode(u.serial))}</span>${u.warranty_months ? ' · 🛡️ ' + esc(warrTxt(u.warranty_months)) : ''}</span>
+        <button class="btn ghost small" type="button" data-rmu="${esc(id)}" data-s="${esc(u.serial)}" style="flex:0 0 auto" aria-label="Retirer cet appareil">✕</button></div>`).join('')}
+      <button class="btn ghost small" type="button" data-addu="${esc(id)}" style="grid-column:1/-1;justify-self:start">＋ Un autre ${esc(p.name)}</button></div>`;
     return `<div class="pline"><div><div class="nm">${esc(p.name)}</div><div class="muted num" style="font-size:13px">${esc(money(p.sell_price))} / ${esc(UNITS[p.unit])}</div></div>
       <div class="num" style="font-weight:700;text-align:right">${esc(money(Math.round(q * p.sell_price)))}</div>
       <div class="step"><button type="button" data-minus="${esc(id)}" aria-label="Un de moins : ${esc(p.name)}">−</button>
@@ -1415,6 +1437,8 @@ function viewPay() {
   document.querySelectorAll('[data-minus]').forEach(b => b.onclick = () => { const v = (S.cart.get(b.dataset.minus) || 0) - 1;
     if (v > 0) S.cart.set(b.dataset.minus, v); else S.cart.delete(b.dataset.minus); drawCart(); });
   document.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.cart.delete(b.dataset.rm); drawCart(); });
+  document.querySelectorAll('[data-rmu]').forEach(b => b.onclick = () => { removeUnit(b.dataset.rmu, b.dataset.s); drawCart(); });
+  document.querySelectorAll('[data-addu]').forEach(b => b.onclick = () => unitPicker(b.dataset.addu));
   const sd = $('#show-disc'); if (sd) sd.onclick = () => { S.showDisc = true; redraw(); setTimeout(() => $('#disc') && $('#disc').focus(), 0); };
   const di = $('#disc');
   if (di) di.oninput = () => {
@@ -1444,11 +1468,12 @@ function viewPay() {
 }
 function setQty(id, v) {
   const p = S.products.find(x => x.id === id);
+  if (isTracked(p) && !S.editQuote) return;       // appareils : on retire ou ajoute une boîte précise
   if (p && v > Number(p.stock_qty) && !S.offline) { toast('Stock insuffisant : ' + p.name + ' (' + qty(p.stock_qty) + ' en stock)', true); v = Math.max(0, Number(p.stock_qty)); }
   if (v > 0) S.cart.set(id, v); else S.cart.delete(id);
 }
 function resetSale() {
-  S.cart.clear(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.payOpen = false; S.payMode = 'cash'; S.recv = ''; S.paidNow = ''; S.showDisc = false;
+  S.cart.clear(); S.cartUnits = new Map(); S.ref = uuid(); S.disc = 0; S.custSel = null; S.payOpen = false; S.payMode = 'cash'; S.recv = ''; S.paidNow = ''; S.showDisc = false;
   const bar = document.getElementById('cartbar'); if (bar) bar.remove();
 }
 // Texte sous le montant : monnaie à rendre, ou ce qui reste en crédit.
@@ -1498,7 +1523,8 @@ async function submitSale() {
       }
     }
   } catch (e) { /* réseau coupé : la suite s'en occupe */ }
-  const items = [...S.cart].map(([product_id, quantity]) => ({ product_id, quantity }));
+  const items = [...S.cart].map(([product_id, quantity]) => { const u = S.cartUnits.get(product_id);
+    return u ? { product_id, quantity: u.length, serials: u.map(x => x.serial) } : { product_id, quantity }; });
   const { data: newSale, error } = await sb.rpc('create_sale', {
     p_shop: S.shop.id, p_items: items, p_paid: paid,
     p_payment_method: pay, p_customer: null, p_client_ref: S.ref, ...(disc ? { p_discount: disc } : {}),
@@ -1513,6 +1539,415 @@ async function submitSale() {
   toast('Vente enregistrée : ' + money(total));
   await loadProducts();
   viewSale();
+}
+
+/* ===== Appareils suivis un par un : téléphones, tablettes, ordinateurs (migration 016) =====
+   Un modèle (« Tecno Spark 20 · 128 Go ») est un produit. Chaque boîte est un appareil avec son
+   numéro : IMEI (téléphones, tablettes) ou numéro de série (ordinateurs).
+   Arrivage : on scanne chaque boîte, on choisit le modèle (proposé tout seul), la couleur et la
+   garantie (décidée par le commerçant). Vente : on scanne la boîte, tout le reste est automatique. */
+const DEV_TYPES = [['Smartphones', '📱', 'Smartphone', 'imei'], ['Téléphones simples', '☎️', 'Simple', 'imei'],
+  ['Tablettes', '📲', 'Tablette', 'imei'], ['Ordinateurs', '💻', 'Ordinateur', 'serial']];
+const devType = cat => DEV_TYPES.find(t => t[0] === cat);
+const isTracked = p => !!(p && p.track_kind);
+const normCode = c => String(c || '').replace(/\s/g, '').toUpperCase();
+const codeName = k => k === 'serial' ? 'N° de série' : 'IMEI';
+const shortCode = c => String(c || '').length > 9 ? '…' + String(c).slice(-6) : String(c || '');
+const WARR = [0, 3, 6, 12, 24];
+const warrTxt = m => Number(m) > 0 ? `${m} mois` : 'Aucune';
+const canTrack = () => S.shop && (S.shop.type === 'telephones' || S.products.some(isTracked));
+// Chiffre de contrôle de l'IMEI (Luhn) : un IMEI mal lu est refusé tout de suite.
+function imeiOk(v) {
+  if (!/^[0-9]{15}$/.test(v)) return false;
+  let s = 0;
+  for (let i = 0; i < 15; i++) { let d = Number(v[i]); if (i % 2) { d *= 2; if (d > 9) d -= 9; } s += d; }
+  return s % 10 === 0;
+}
+const unitByCode = c => (S.units || []).find(u => u.serial === c || u.serial2 === c);
+const unitsOf = pid => (S.units || []).filter(u => u.product_id === pid);
+const inCartCodes = () => new Set([...(S.cartUnits || new Map()).values()].flat().map(u => u.serial));
+const UNIT_ST = { in_stock: ['🟢', 'En stock', ''], sold: ['🔵', 'Vendu', ''], defective: ['🟠', 'En panne', 'warn'], stolen: ['🔴', 'Volé', 'bad'] };
+
+async function loadUnits() {
+  S.units = [];
+  if (!S.products.some(isTracked)) return;
+  const { data, error } = await sb.from('product_units').select('id,product_id,serial,serial2,color,warranty_months')
+    .eq('shop_id', S.shop.id).eq('status', 'in_stock').order('received_at');
+  if (!error) S.units = data || [];
+}
+
+// Panier : un appareil précis (avec son numéro).
+function addUnitToCart(u) {
+  const p = S.products.find(x => x.id === u.product_id);
+  if (!p) return toast('Modèle introuvable.', true);
+  S.cartUnits = S.cartUnits || new Map();
+  const list = S.cartUnits.get(p.id) || [];
+  if (list.some(x => x.serial === u.serial)) return toast('Déjà dans le panier : ' + shortCode(u.serial), true);
+  list.push({ serial: u.serial, color: u.color || '', warranty_months: Number(u.warranty_months) || 0 });
+  S.cartUnits.set(p.id, list); S.cart.set(p.id, list.length);
+  try { navigator.vibrate && navigator.vibrate(25); } catch (e) {}
+  toast(`Ajouté : ${p.name}${u.color ? ' · ' + u.color : ''}`);
+  if ($('#plist') && !S.payOpen && $('#plist').className === 'tiles') drawProducts();
+  drawCart();
+}
+function removeUnit(pid, serial) {
+  const list = (S.cartUnits.get(pid) || []).filter(x => x.serial !== serial);
+  if (list.length) { S.cartUnits.set(pid, list); S.cart.set(pid, list.length); } else { S.cartUnits.delete(pid); S.cart.delete(pid); }
+}
+// Code scanné ou tapé à la caisse : appareil, sinon produit. Renvoie vrai si quelque chose est ajouté.
+function sellByCode(code) {
+  const c = normCode(code), u = unitByCode(c);
+  if (u) { if (inCartCodes().has(u.serial)) { toast('Déjà dans le panier.', true); return false; } addUnitToCart(u); return true; }
+  const p = findByCode(code);
+  if (p) { addToCart(p.id); return true; }
+  if (/^[0-9]{15}$/.test(c) || S.products.some(isTracked)) {
+    if (S.offline) toast('Appareil absent du stock de ce téléphone : ' + c, true);
+    else sb.rpc('unit_find', { p_shop: S.shop.id, p_code: c }).then(({ data }) => {
+      const x = data && data.unit;
+      toast(!data || !data.found ? `Appareil inconnu : ${c}. Faites d'abord son arrivage.` :
+        x.status === 'sold' ? `Déjà vendu : ${x.product} (facture ${invNo(x.invoice_no)}).` : `${x.product} : ${UNIT_ST[x.status][1].toLowerCase()}.`, true);
+    });
+    return false;
+  }
+  toast('Aucun produit avec le code ' + code + '.', true);
+  return false;
+}
+
+// Vendre un modèle suivi : scanner la boîte, ou choisir l'appareil dans la liste.
+function unitPicker(pid) {
+  const p = S.products.find(x => x.id === pid); if (!p) return;
+  const taken = inCartCodes(), list = unitsOf(pid).filter(u => !taken.has(u.serial));
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="${esc(p.name)}">
+    <div style="display:flex;gap:12px;align-items:center">${prodIcon(p, 52)}<div style="min-width:0"><h2>${esc(p.name)}</h2><div class="muted">${esc(money(p.sell_price))}</div></div></div>
+    ${canScan() ? `<button class="btn huge" id="up-scan">📷 Scanner la boîte</button>` : ''}
+    ${list.length ? `<div class="muted" style="font-size:13px">ou touchez l'appareil (${list.length} en stock) :</div>
+      <div class="plist">${list.map(u => `<button class="prow" data-u="${esc(u.serial)}"><span style="font-size:24px" aria-hidden="true">${devType(p.category) ? devType(p.category)[1] : '📱'}</span>
+        <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(u.color || 'Couleur ?')}</span><br><span class="sub">${esc(codeName(p.track_kind))} ${esc(shortCode(u.serial))}</span></span>
+        <span class="sub" style="flex:0 0 auto">${Number(u.warranty_months) ? '🛡️ ' + esc(warrTxt(u.warranty_months)) : ''}</span></button>`).join('')}</div>`
+      : `<div class="banner" style="margin:0">Aucun appareil en stock pour ce modèle${S.offline ? ' sur ce téléphone' : ''}. ${isManager() ? 'Faites l\'arrivage (Produits).' : ''}</div>`}
+    <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  document.querySelectorAll('[data-u]').forEach(b => b.onclick = () => { closeSheet(); addUnitToCart(unitByCode(b.dataset.u)); });
+  const sc = $('#up-scan'); if (sc) sc.onclick = () => { closeSheet(); scanToCart(); };
+}
+
+/* --- Nouveau modèle : type, marque, modèle, mémoire. La couleur se note à l'arrivage, boîte par boîte. --- */
+const PC_BRANDS = ['HP', 'Dell', 'Lenovo', 'Acer', 'Asus', 'Apple', 'Toshiba'];
+const PC_RAM = ['4', '8', '16', '32'], PC_DISK = ['128 Go', '256 Go', '512 Go', '1 To'];
+function modelName(v) {
+  const head = [v.brand, v.model].filter(Boolean).join(' ');
+  if (v.kind === 'Ordinateurs') return [head, v.ram ? v.ram + ' Go RAM' : '', v.disk].filter(Boolean).join(' · ');
+  return [head, v.mem ? v.mem + ' Go' : ''].filter(Boolean).join(' · ');
+}
+function modelForm(v, after) {
+  v = { kind: 'Smartphones', brand: '', model: '', mem: '', ram: '', disk: '', sell: '', buy: '', ...v };
+  const pc = v.kind === 'Ordinateurs';
+  const chips = (key, list, suffix) => `<div class="chips" style="flex-wrap:wrap">${list.map(x => `<button type="button" data-mf="${key}" data-v="${esc(x)}" aria-pressed="${v[key] === x}">${esc(x)}${suffix || ''}</button>`).join('')}</div>`;
+  const big = 'style="font-size:18px;height:50px;font-weight:700"';
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Nouveau modèle">
+    <h2>Nouveau modèle</h2>
+    <div class="modes" style="grid-template-columns:repeat(4,minmax(0,1fr))" role="radiogroup" aria-label="Type">
+      ${DEV_TYPES.map(([c, ic, l]) => `<button type="button" data-kind="${esc(c)}" aria-pressed="${v.kind === c}" style="height:70px;font-size:12.5px"><span class="mi">${ic}</span>${l}</button>`).join('')}</div>
+    <label>Marque<input id="mf-brand" value="${esc(v.brand)}" maxlength="40" placeholder="${pc ? 'ex. HP' : 'ex. Tecno'}" ${big}></label>${chips('brand', pc ? PC_BRANDS : PH_BRANDS)}
+    <label>Modèle<input id="mf-model" value="${esc(v.model)}" maxlength="40" placeholder="${pc ? 'ex. 250 G9' : 'ex. Spark 20'}"></label>
+    ${pc ? `<div class="muted" style="font-size:13px;font-weight:600">Mémoire vive (RAM)</div>${chips('ram', PC_RAM, ' Go')}
+      <div class="muted" style="font-size:13px;font-weight:600">Stockage</div>${chips('disk', PC_DISK)}`
+      : `<label>Mémoire (Go)<input id="mf-mem" value="${esc(v.mem)}" inputmode="numeric" maxlength="5" placeholder="${v.kind === 'Téléphones simples' ? 'facultatif' : 'ex. 128'}"></label>${chips('mem', PH_MEM, ' Go')}`}
+    <div class="metric" style="text-align:center"><span>Nom du modèle</span><b id="mf-name" style="font-size:18px">${esc(modelName(v) || '…')}</b></div>
+    <div class="row"><label>Prix de vente<input id="mf-sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.sell)}" ${big}></label>
+      <label>Prix d'achat (facultatif)<input id="mf-buy" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.buy)}" ${big}></label></div>
+    <p class="muted" style="margin:0;font-size:12.5px">La couleur et la garantie se notent à l'arrivage, boîte par boîte.</p>
+    <button class="btn huge" type="submit">✓ Enregistrer le modèle</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
+  const read = () => {
+    v.brand = $('#mf-brand').value.trim(); v.model = $('#mf-model').value.trim();
+    if ($('#mf-mem')) v.mem = $('#mf-mem').value.replace(/[^0-9]/g, '');
+    v.sell = $('#mf-sell').value; v.buy = $('#mf-buy').value;
+    $('#mf-name').textContent = modelName(v) || '…';
+    document.querySelectorAll('[data-mf]').forEach(b => b.setAttribute('aria-pressed', v[b.dataset.mf] === b.dataset.v));
+  };
+  $('#sheet').addEventListener('input', read);
+  document.querySelectorAll('[data-mf]').forEach(b => b.onclick = () => { const k = b.dataset.mf;
+    if ($('#mf-' + k)) $('#mf-' + k).value = b.dataset.v; else v[k] = v[k] === b.dataset.v ? '' : b.dataset.v; read(); });
+  document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { read(); const was = v.kind === 'Ordinateurs';
+    v.kind = b.dataset.kind; if (was !== (v.kind === 'Ordinateurs')) v.brand = ''; modelForm(v, after); });
+  $('#cancel').onclick = () => after ? after(null) : closeSheet();
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') $('#cancel').click(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault(); read();
+    const name = modelName(v), sell = Math.round(Number(v.sell)), buy = v.buy === '' ? null : Math.round(Number(v.buy));
+    if (!v.brand && !v.model) return toast('Tapez au moins la marque ou le modèle.', true);
+    if (v.sell === '' || !(sell > 0)) return toast('Tapez le prix de vente.', true);
+    if (S.products.some(p => nameKey(p.name) === nameKey(name))) return toast('Ce modèle existe déjà : ' + name, true);
+    const btn = ev.target.querySelector('[type=submit]');
+    if (buy != null && sell < buy && !btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = 'Confirmer (vente à perte)'; return toast(`Attention : vente ${money(sell)} < achat ${money(buy)}.`, true); }
+    btn.disabled = true;
+    const { data, error } = await sb.rpc('create_device_model', { p_shop: S.shop.id, p_name: name, p_category: v.kind,
+      p_track_kind: devType(v.kind)[3], p_buy_price: buy, p_sell_price: sell, p_alert: 0 });
+    if (error) { btn.disabled = false; return toast(/create_device_model/.test(error.message || '') ? 'Installez d\'abord la mise à jour 016 dans Supabase.' : cleanErr(error), true); }
+    await loadProducts(); S.summary = null;
+    toast('Modèle enregistré : ' + name);
+    if (after) return after(data);
+    // Seul : on propose tout de suite l'arrivage des boîtes.
+    $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Modèle enregistré">
+      <h2>✅ ${esc(name)}</h2><div class="metric" style="text-align:center"><b>${esc(money(sell))}</b><span>0 en stock pour l'instant</span></div>
+      <button class="btn huge" id="mf-arr">📥 Scanner les boîtes reçues</button>
+      <button class="btn ghost" id="mf-new">Un autre modèle</button><button class="btn ghost" id="mf-done">Terminé</button></div></div>`;
+    $('#mf-arr').onclick = () => arrival({ pid: data });
+    $('#mf-new').onclick = () => modelForm({ kind: v.kind, brand: v.brand });
+    $('#mf-done').onclick = () => { closeSheet(); draw(); };
+  };
+}
+
+/* --- Arrivage par scan : une boîte = un appareil. Le formulaire garde le modèle, la couleur et la
+       garantie de la boîte précédente : pour 10 boîtes pareilles, on scanne et on touche « Enregistrer ». --- */
+function arrival(opts = {}) {
+  if (S.offline) return toast('L\'arrivage se fait avec du réseau.', true);
+  S.arr = { pid: opts.pid || (S.arr && S.arr.pid) || null, color: (S.arr && S.arr.color) || '',
+    warranty: S.arr && S.arr.warranty != null ? S.arr.warranty : (S.shop.warranty || 0), existing: !!opts.existing, n: 0 };
+  arrivalStart();
+}
+function arrivalStart(msg) {
+  const A = S.arr, p = A.pid && S.products.find(x => x.id === A.pid);
+  const left = A.existing && p ? Number(p.stock_qty) - unitsOf(p.id).length : 0;
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Arrivage">
+    <h2>📥 ${A.existing ? 'Boîtes déjà en stock' : 'Arrivage'}</h2>
+    ${msg ? `<div class="banner ok" style="margin:0">${msg}</div>` : ''}
+    ${A.n ? `<div class="metric" style="text-align:center"><b style="font-size:28px">${A.n}</b><span>boîte${A.n > 1 ? 's' : ''} enregistrée${A.n > 1 ? 's' : ''}</span></div>` : ''}
+    ${A.existing && p ? `<div class="muted" style="font-size:13.5px">${esc(p.name)} : encore <b>${left}</b> boîte${left > 1 ? 's' : ''} à scanner (le stock ne change pas).</div>` : ''}
+    <p class="muted" style="margin:0;font-size:13.5px">Scannez le code <b>IMEI</b> sur la boîte (ou le <b>numéro de série</b> d'un ordinateur).</p>
+    ${canScan() ? '<button class="btn huge" type="button" id="ar-scan">📷 Scanner la boîte</button>' : ''}
+    <div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label style="flex:1 1 auto">ou tapez le numéro<input id="ar-code" autocomplete="off" maxlength="44" inputmode="text" style="font-size:18px;height:50px;letter-spacing:.5px"></label>
+      <button class="btn" type="submit" style="flex:0 0 auto;margin-bottom:2px">OK</button></div>
+    <button class="btn ghost" type="button" id="ar-done">Terminé</button></form></div>`;
+  const done = async () => { closeSheet(); await loadProducts(); S.summary = null; draw(); };
+  $('#ar-done').onclick = done;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') done(); };
+  $('#sheet').onsubmit = ev => { ev.preventDefault(); const c = $('#ar-code').value; if (c.trim()) arrivalCode(c); };
+  const sc = $('#ar-scan'); if (sc) sc.onclick = () => openScanner('Arrivage : scannez la boîte', code => { arrivalCode(code); return false; });
+}
+async function arrivalCode(raw) {
+  const c = normCode(raw);
+  if (/^[0-9]{15}$/.test(c) && !imeiOk(c)) { toast('IMEI mal lu : ' + c + '. Scannez encore.', true); return arrivalStart(); }
+  if (/^[0-9]{14,17}$/.test(c) && c.length !== 15) { toast('Un IMEI a 15 chiffres : ' + c + '. Scannez le code marqué « IMEI ».', true); return arrivalStart(); }
+  if (!/^[0-9A-Z][0-9A-Z/.-]{3,39}$/.test(c)) { toast('Numéro invalide : ' + c, true); return arrivalStart(); }
+  const { data, error } = await sb.rpc('unit_find', { p_shop: S.shop.id, p_code: c });
+  if (error) { toast(/unit_find/.test(error.message || '') ? 'Installez d\'abord la mise à jour 016 dans Supabase.' : cleanErr(error), true); return arrivalStart(); }
+  if (data.found) { const u = data.unit; toast(`Déjà enregistré : ${u.product} (${UNIT_ST[u.status][1].toLowerCase()}).`, true); return arrivalStart(); }
+  if (data.suggest && !S.arr.existing) S.arr.pid = data.suggest.product_id;
+  arrivalForm(c);
+}
+function arrivalForm(code, extra = {}) {
+  const A = S.arr, imei = /^[0-9]{15}$/.test(code);
+  const models = S.products.filter(isTracked).sort((a, b) => (b.track_kind === (imei ? 'imei' : 'serial')) - (a.track_kind === (imei ? 'imei' : 'serial')) || a.name.localeCompare(b.name, 'fr'));
+  if (A.pid && !models.some(m => m.id === A.pid)) A.pid = null;
+  if (!A.pid && models.length === 1) A.pid = models[0].id;
+  const p = A.pid && S.products.find(x => x.id === A.pid);
+  const big = 'style="font-size:18px;height:50px;font-weight:700"';
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Nouvelle boîte">
+    <h2>📦 Nouvelle boîte</h2>
+    <div class="metric" style="text-align:center"><span>${imei ? 'IMEI ✓' : 'N° de série'}</span><b style="font-size:19px;letter-spacing:.5px;word-break:break-all">${esc(code)}</b></div>
+    <div class="muted" style="font-size:13px;font-weight:600">Modèle</div>
+    ${A.existing && p ? `<div class="prow" style="cursor:default">${prodIcon(p, 40)}<span class="nm">${esc(p.name)}</span></div>` : `
+    <div class="plist" role="radiogroup" aria-label="Modèle" style="max-height:236px;overflow:auto">${models.map(m => `<button type="button" class="prow" data-m="${esc(m.id)}" aria-pressed="${m.id === A.pid}" style="${m.id === A.pid ? 'border:3px solid var(--accent);background:var(--accent-soft)' : ''}">
+        ${prodIcon(m, 40)}<span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(m.name)}</span><br><span class="sub">${esc(money(m.sell_price))} · ${esc(qty(m.stock_qty))} en stock</span></span>${m.id === A.pid ? '<span style="font-size:20px">✓</span>' : ''}</button>`).join('')
+      || '<p class="muted" style="margin:0">Aucun modèle encore : créez-le.</p>'}</div>
+    <button class="btn ghost" type="button" id="ar-newm">＋ Nouveau modèle</button>`}
+    <label>Couleur<input id="ar-color" value="${esc(A.color)}" maxlength="30" placeholder="ex. Noir"></label>
+    <div class="chips" style="flex-wrap:wrap">${PH_COLORS.map(c => `<button type="button" data-col="${esc(c)}" aria-pressed="${A.color === c}">${esc(c)}</button>`).join('')}</div>
+    <div class="muted" style="font-size:13px;font-weight:600">🛡️ Garantie (vous décidez)</div>
+    <div class="chips" style="flex-wrap:wrap">${WARR.map(w => `<button type="button" data-w="${w}" aria-pressed="${Number(A.warranty) === w}">${esc(warrTxt(w))}</button>`).join('')}
+      ${WARR.includes(Number(A.warranty)) ? '' : `<button type="button" data-w="${Number(A.warranty)}" aria-pressed="true">${esc(warrTxt(A.warranty))}</button>`}</div>
+    ${MORE(`${imei ? `<label>2e IMEI (téléphone double SIM, facultatif)<input id="ar-s2" value="${esc(extra.s2 || '')}" inputmode="numeric" maxlength="20"></label>
+        ${canScan() ? '<button class="btn ghost small" type="button" id="ar-s2scan">📷 Scanner le 2e IMEI</button>' : ''}` : ''}
+      ${A.existing ? '' : `<label>Prix d'achat de cet appareil (facultatif)<input id="ar-buy" type="number" inputmode="numeric" min="0" step="1" value="${esc(extra.buy ?? '')}" placeholder="si vous savez" ${big}></label>`}`)}
+    <button class="btn huge" type="submit" ${canWrite() ? '' : 'disabled'}>✓ Enregistrer</button>
+    <button class="btn ghost" type="button" id="cancel">Annuler cette boîte</button></form></div>`;
+  const keep = () => ({ s2: $('#ar-s2') ? $('#ar-s2').value : '', buy: $('#ar-buy') ? $('#ar-buy').value : '' });
+  $('#ar-color').oninput = () => { A.color = $('#ar-color').value.trim(); document.querySelectorAll('[data-col]').forEach(b => b.setAttribute('aria-pressed', A.color === b.dataset.col)); };
+  document.querySelectorAll('[data-col]').forEach(b => b.onclick = () => { $('#ar-color').value = b.dataset.col; $('#ar-color').oninput(); });
+  document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { A.warranty = Number(b.dataset.w); document.querySelectorAll('[data-w]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { A.pid = b.dataset.m; arrivalForm(code, keep()); });
+  const nm = $('#ar-newm'); if (nm) nm.onclick = () => { const k = keep();
+    modelForm({ kind: imei ? 'Smartphones' : 'Ordinateurs' }, pid => { if (pid) A.pid = pid; arrivalForm(code, k); }); };
+  const s2 = $('#ar-s2scan'); if (s2) s2.onclick = () => openScanner('Scanner le 2e IMEI', c2 => { const v = normCode(c2);
+    if (v === code) { toast('C\'est le même IMEI : scannez l\'autre.', true); return true; } $('#ar-s2').value = v; return false; });
+  $('#cancel').onclick = () => arrivalStart();
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') arrivalStart(); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    if (!A.pid) return toast('Choisissez le modèle (ou créez-le).', true);
+    const s2 = $('#ar-s2') ? normCode($('#ar-s2').value) : '';
+    if (s2 && /^[0-9]{15}$/.test(s2) && !imeiOk(s2)) return toast('2e IMEI mal lu : vérifiez-le.', true);
+    const buyRaw = $('#ar-buy') ? $('#ar-buy').value : '';
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true; btn.textContent = 'Enregistrement…';
+    const { error } = await sb.rpc('receive_unit', { p_shop: S.shop.id, p_product: A.pid, p_serial: code, p_serial2: s2 || null,
+      p_color: A.color || null, p_warranty_months: Number(A.warranty) || 0, p_buy_price: buyRaw === '' ? null : Math.round(Number(buyRaw)),
+      p_existing: A.existing, p_client_ref: uuid() });
+    if (error) { btn.disabled = false; btn.textContent = '✓ Enregistrer'; return toast(cleanErr(error), true); }
+    A.n++;
+    const m = S.products.find(x => x.id === A.pid);
+    if (m && !A.existing) m.stock_qty = Number(m.stock_qty) + 1;
+    S.units = S.units || []; S.units.push({ id: null, product_id: A.pid, serial: code, serial2: s2 || null, color: A.color || null, warranty_months: Number(A.warranty) || 0 });
+    try { navigator.vibrate && navigator.vibrate([40, 40, 40]); } catch (e) {}
+    const rest = A.existing && m ? Number(m.stock_qty) - unitsOf(m.id).length : 1;
+    if (A.existing && rest <= 0) { toast('Toutes les boîtes de ' + m.name + ' sont scannées ✓'); closeSheet(); await loadProducts(); return draw(); }
+    arrivalStart(`✓ ${esc(m ? m.name : '')}${A.color ? ' · ' + esc(A.color) : ''} enregistré. Boîte suivante ?`);
+    if (canScan()) $('#ar-scan').click();
+  };
+}
+
+/* --- Fiche d'un appareil : état, garantie, facture, parcours ; panne, vol, retour sous garantie --- */
+const EV_TXT = { received: ['📥', 'Arrivage'], sold: ['🛒', 'Vendu'], sale_cancelled: ['↩️', 'Vente annulée, remis en stock'],
+  defective: ['🟠', 'En panne'], stolen: ['🔴', 'Volé'], back_in_stock: ['🟢', 'Remis en stock'], warranty_claim: ['🛡️', 'Retour du client (garantie)'],
+  edited: ['✏️', 'Modifié'], conflict: ['⚠️', 'Vendu hors ligne alors que déjà vendu'] };
+async function unitSheet(code) {
+  if (S.offline) return toast('La fiche d\'un appareil s\'ouvre avec du réseau.', true);
+  const { data, error } = await sb.rpc('unit_find', { p_shop: S.shop.id, p_code: normCode(code) });
+  if (error) return toast(cleanErr(error), true);
+  if (!data.found) return toast('Aucun appareil avec ce numéro : ' + normCode(code), true);
+  const u = data.unit, st = UNIT_ST[u.status], mgr = isManager() && canWrite();
+  const wOk = u.warranty_until && dDay(u.warranty_until) && new Date(u.warranty_until + 'T23:59:59') >= new Date();
+  const p = S.products.find(x => x.id === u.product_id) || { name: u.product, category: u.category };
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Appareil">
+    <div style="display:flex;gap:12px;align-items:center">${prodIcon(p, 56)}<div style="min-width:0"><h2>${esc(u.product)}</h2>
+      <div><span class="tag ${st[2]}" style="font-size:13px;padding:4px 10px">${st[0]} ${st[1]}</span>${u.color ? ` <span class="muted">· ${esc(u.color)}</span>` : ''}</div></div></div>
+    <div class="metric"><span>${esc(codeName(u.track_kind))}</span><b style="font-size:17px;word-break:break-all">${esc(u.serial)}${u.serial2 ? '<br>' + esc(u.serial2) : ''}</b></div>
+    <div class="grid2">
+      <div class="metric"><span>🛡️ Garantie</span><b style="font-size:16px">${u.status === 'sold' && u.warranty_until ? 'jusqu\'au ' + esc(dDay(u.warranty_until)) : esc(warrTxt(u.warranty_months))}</b>
+        ${u.status === 'sold' && u.warranty_until ? `<span class="tag ${wOk ? '' : 'bad'}">${wOk ? 'valable' : 'terminée'}</span>` : ''}</div>
+      ${u.status === 'sold' ? `<div class="metric"><span>Facture</span><b style="font-size:16px">${esc(invNo(u.invoice_no))}</b><span>${esc(u.customer || '')} ${esc(dDay(u.sold_at))}</span></div>`
+        : `<div class="metric"><span>Reçu le</span><b style="font-size:16px">${esc(dDay(u.received_at))}</b></div>`}</div>
+    <div class="bigacts">
+      ${u.status === 'in_stock' ? `<button class="btn" id="un-sell"><span>🛒</span>Vendre<small>ajouter au panier</small></button>` : ''}
+      ${u.status === 'sold' ? `<button class="btn" id="un-inv"><span>🧾</span>Facture<small>voir, renvoyer</small></button>
+        <button class="btn ghost" id="un-claim" ${canWrite() ? '' : 'disabled'}><span>🛡️</span>Retour client<small>panne sous garantie</small></button>` : ''}
+      ${mgr && ['in_stock', 'sold'].includes(u.status) ? `<button class="btn ghost" id="un-edit"><span>✏️</span>Modifier<small>couleur, garantie</small></button>` : ''}
+      ${mgr && u.status === 'in_stock' ? `<button class="btn ghost" id="un-def"><span>🟠</span>En panne<small>sort du stock</small></button>
+        <button class="btn ghost" id="un-stolen" style="color:var(--bad)"><span>🔴</span>Volé<small>sort du stock</small></button>` : ''}
+      ${mgr && ['defective', 'stolen'].includes(u.status) ? `<button class="btn" id="un-back"><span>🟢</span>Remettre en stock<small>réparé, retrouvé</small></button>` : ''}</div>
+    <details class="more"><summary>Parcours de l'appareil (${data.events.length})</summary>
+      <div class="plist" style="margin-top:8px">${data.events.map(e => `<div class="prow" style="cursor:default;align-items:flex-start"><span style="font-size:20px" aria-hidden="true">${EV_TXT[e.kind][0]}</span>
+        <span style="min-width:0;flex:1 1 auto"><span class="nm" style="font-size:14.5px">${esc(EV_TXT[e.kind][1])}${e.invoice_no ? ' · ' + esc(invNo(e.invoice_no)) : ''}</span><br>
+        <span class="sub">${esc(dtFull(e.at))}${e.by ? ' · ' + esc(e.by) : ''}</span>${e.note ? `<br><span class="sub">« ${esc(e.note)} »</span>` : ''}</span></div>`).join('')}</div></details>
+    <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  const on = (id, fn) => { const b = $('#' + id); if (b) b.onclick = fn; };
+  on('un-sell', () => { closeSheet(); const x = unitByCode(u.serial); if (!x) return toast('Rechargez la page : appareil pas encore dans la liste.', true); addUnitToCart(x); go('sale'); });
+  on('un-inv', () => openInvoice(u.sale_id));
+  on('un-claim', () => unitNote(u, 'claim'));
+  on('un-def', () => unitNote(u, 'defective'));
+  on('un-stolen', () => unitNote(u, 'stolen'));
+  on('un-back', () => unitNote(u, 'in_stock'));
+  on('un-edit', () => unitEdit(u));
+}
+function unitNote(u, kind) {
+  const T = { claim: ['🛡️ Retour du client', 'Quel est le problème ?', ['Ne charge plus', 'Écran', 'Ne s\'allume plus', 'Réseau', 'Batterie']],
+    defective: ['🟠 Appareil en panne', 'Quelle panne ?', ['Ne s\'allume pas', 'Écran cassé', 'Défaut d\'usine']],
+    stolen: ['🔴 Appareil volé', 'Que s\'est-il passé ?', ['Volé dans la boutique', 'Vol la nuit', 'Disparu']],
+    in_stock: ['🟢 Remettre en stock', 'Pourquoi ?', ['Réparé', 'Retrouvé', 'Erreur']] }[kind];
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="${esc(T[0])}">
+    <h2>${esc(T[0])}</h2><div class="muted">${esc(u.product)} · ${esc(shortCode(u.serial))}</div>
+    ${kind === 'claim' ? `<div class="banner ${u.warranty_until && new Date(u.warranty_until + 'T23:59:59') >= new Date() ? 'ok' : 'bad'}" style="margin:0">${u.warranty_until ? 'Garantie jusqu\'au ' + esc(dDay(u.warranty_until)) + (new Date(u.warranty_until + 'T23:59:59') >= new Date() ? ' : encore valable.' : ' : terminée.') : 'Vendu sans garantie.'}</div>` : ''}
+    ${kind === 'stolen' ? '<div class="banner" style="margin:0">L\'appareil sort du stock. Son IMEI sera dans la « Liste des appareils volés » (pour la police et l\'opérateur).</div>' : ''}
+    <label>${esc(T[1])}<input id="un-note" maxlength="300" required></label>
+    <div class="quick">${T[2].map(w => `<button type="button" data-why="${esc(w)}">${esc(w)}</button>`).join('')}</div>
+    <button class="btn huge" type="submit">✓ Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
+  document.querySelectorAll('[data-why]').forEach(b => b.onclick = () => { $('#un-note').value = b.dataset.why; });
+  $('#cancel').onclick = () => unitSheet(u.serial);
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const note = $('#un-note').value.trim();
+    if (note.length < 3) return toast('Écrivez quelques mots.', true);
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const { error } = kind === 'claim' ? await sb.rpc('warranty_claim', { p_unit: u.id, p_note: note })
+      : await sb.rpc('set_unit_status', { p_unit: u.id, p_status: kind, p_note: note });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    toast('Enregistré ✓');
+    if (kind !== 'claim') { await loadProducts(); S.summary = null; }
+    unitSheet(u.serial);
+  };
+}
+function unitEdit(u) {
+  let w = Number(u.warranty_months) || 0, color = u.color || '';
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Modifier l'appareil">
+    <h2>✏️ ${esc(u.product)}</h2><div class="muted">${esc(codeName(u.track_kind))} ${esc(u.serial)}</div>
+    <label>Couleur<input id="ue-color" value="${esc(color)}" maxlength="30"></label>
+    <div class="chips" style="flex-wrap:wrap">${PH_COLORS.map(c => `<button type="button" data-col="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    <div class="muted" style="font-size:13px;font-weight:600">🛡️ Garantie${u.status === 'sold' ? ' (comptée depuis la vente, le ' + esc(dDay(u.sold_at)) + ')' : ''}</div>
+    <div class="chips" style="flex-wrap:wrap">${[...new Set([...WARR, w])].sort((a, b) => a - b).map(x => `<button type="button" data-w="${x}" aria-pressed="${x === w}">${esc(warrTxt(x))}</button>`).join('')}</div>
+    ${u.track_kind === 'imei' ? MORE(`<label>2e IMEI (vide = aucun)<input id="ue-s2" value="${esc(u.serial2 || '')}" inputmode="numeric" maxlength="20"></label>`) : ''}
+    <button class="btn huge" type="submit">✓ Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
+  document.querySelectorAll('[data-col]').forEach(b => b.onclick = () => { $('#ue-color').value = b.dataset.col; });
+  document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { w = Number(b.dataset.w); document.querySelectorAll('[data-w]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  $('#cancel').onclick = () => unitSheet(u.serial);
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const { error } = await sb.rpc('update_unit', { p_unit: u.id, p_color: $('#ue-color').value.trim(), p_warranty_months: w,
+      p_serial2: $('#ue-s2') ? normCode($('#ue-s2').value) : null });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    toast('Enregistré ✓'); await loadUnits(); unitSheet(u.serial);
+  };
+}
+
+// Retrouver un appareil par son numéro (client qui revient, contrôle) ; liste des appareils volés.
+function findUnitSheet() {
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Retrouver un appareil">
+    <h2>🔎 Retrouver un appareil</h2>
+    <p class="muted" style="margin:0;font-size:13.5px">Scannez ou tapez l'IMEI (ou le numéro de série) : vous voyez à qui il a été vendu, sa garantie et tout son parcours.</p>
+    ${canScan() ? '<button class="btn huge" type="button" id="fu-scan">📷 Scanner</button>' : ''}
+    <div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label style="flex:1 1 auto">Numéro<input id="fu-code" autocomplete="off" maxlength="44" style="font-size:18px;height:50px"></label>
+      <button class="btn" type="submit" style="flex:0 0 auto;margin-bottom:2px">OK</button></div>
+    ${isManager() ? '<button class="btn ghost" type="button" id="fu-stolen">🚨 Liste des appareils volés</button>' : ''}
+    <button class="btn ghost" type="button" id="cancel">Fermer</button></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#sheet').onsubmit = ev => { ev.preventDefault(); if ($('#fu-code').value.trim()) unitSheet($('#fu-code').value); };
+  const sc = $('#fu-scan'); if (sc) sc.onclick = () => openScanner('Scanner l\'appareil', c => { unitSheet(c); return false; });
+  const st = $('#fu-stolen'); if (st) st.onclick = stolenList;
+}
+async function stolenList() {
+  const { data, error } = await sb.from('product_units').select('serial,serial2,color,products(name),unit_events(kind,created_at,note)')
+    .eq('shop_id', S.shop.id).eq('status', 'stolen');
+  if (error) return toast(cleanErr(error), true);
+  const rows = (data || []).map(u => { const e = (u.unit_events || []).filter(x => x.kind === 'stolen').sort((a, b) => a.created_at < b.created_at ? 1 : -1)[0];
+    return { ...u, when: e ? e.created_at : null, note: e ? e.note : '' }; });
+  const text = [`${S.shop.name} : appareils volés (${rows.length})`, ...rows.map(r => `- ${r.products?.name || ''}${r.color ? ' ' + r.color : ''} : ${r.serial}${r.serial2 ? ' / ' + r.serial2 : ''}${r.when ? ' (déclaré le ' + dDay(r.when) + ')' : ''}`)].join('\n');
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Appareils volés">
+    <h2>🚨 Appareils volés (${rows.length})</h2>
+    ${rows.length ? `<div class="plist">${rows.map(r => `<div class="prow" style="cursor:default;align-items:flex-start"><span style="font-size:20px">🔴</span><span style="min-width:0;flex:1 1 auto">
+      <span class="nm">${esc(r.products?.name || '')}${r.color ? ' · ' + esc(r.color) : ''}</span><br><span class="sub" style="word-break:break-all">${esc(r.serial)}${r.serial2 ? ' / ' + esc(r.serial2) : ''}</span>
+      ${r.when ? `<br><span class="sub">${esc(dDay(r.when))}${r.note ? ' · ' + esc(r.note) : ''}</span>` : ''}</span></div>`).join('')}</div>
+      <p class="muted" style="margin:0;font-size:12.5px">Donnez cette liste à la police et à l'opérateur : eux seuls peuvent bloquer un téléphone.</p>
+      <button class="btn" id="sl-share">💬 Envoyer la liste (WhatsApp)</button>` : '<p class="empty">Aucun appareil volé ✓</p>'}
+    <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  const sh = $('#sl-share'); if (sh) sh.onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
+}
+
+// Ancien modèle vendu en nombre : passer au suivi par numéro, puis scanner les boîtes déjà en stock.
+function trackSheet(p) {
+  const t = devType(p.category) || DEV_TYPES[0];
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Suivre par numéro">
+    <h2>🔢 Suivre par ${esc(codeName(t[3]))}</h2><div class="muted">${esc(p.name)}</div>
+    <p style="margin:0">Chaque boîte aura son numéro : la vente se fait par scan, la facture porte le numéro et la garantie, et on retrouve l'appareil en cas de retour ou de vol.</p>
+    <div class="modes" style="grid-template-columns:repeat(2,minmax(0,1fr))"><button type="button" data-tk="imei" aria-pressed="${t[3] === 'imei'}"><span class="mi">📱</span>IMEI</button>
+      <button type="button" data-tk="serial" aria-pressed="${t[3] === 'serial'}"><span class="mi">💻</span>N° de série</button></div>
+    ${Number(p.stock_qty) > 0 ? `<div class="banner" style="margin:0">Ensuite, scannez les ${esc(qty(p.stock_qty))} boîtes déjà en stock (le stock ne change pas).</div>` : ''}
+    <button class="btn huge" id="tk-go">✓ Activer</button><button class="btn ghost" id="cancel">Annuler</button></div></div>`;
+  let kind = t[3];
+  document.querySelectorAll('[data-tk]').forEach(b => b.onclick = () => { kind = b.dataset.tk; document.querySelectorAll('[data-tk]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  $('#cancel').onclick = () => productSheet(p.id);
+  $('#tk-go').onclick = async () => {
+    const { error } = await sb.rpc('set_product_tracked', { p_product: p.id, p_track_kind: kind });
+    if (error) return toast(/set_product_tracked/.test(error.message || '') ? 'Installez d\'abord la mise à jour 016 dans Supabase.' : cleanErr(error), true);
+    await loadProducts(); toast('Suivi par numéro activé ✓');
+    const q = S.products.find(x => x.id === p.id);
+    if (q && Number(q.stock_qty) > unitsOf(q.id).length) arrival({ pid: q.id, existing: true }); else productSheet(p.id);
+  };
 }
 
 /* ===== Onglet Produits ===== */
@@ -1594,7 +2029,7 @@ function newProductChoice() {
   const phones = S.shop.type === 'telephones';
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Nouveau produit">
     <h2>Ajouter des produits</h2>
-    ${phones ? `<button class="btn huge" id="np-phone" style="height:auto;padding:16px">📱 Nouveau téléphone<br><small style="font:400 13px var(--f-body);opacity:.85">marque, modèle, mémoire, couleur</small></button>` : ''}
+    ${phones ? `<button class="btn huge" id="np-phone" style="height:auto;padding:16px">📱 Nouveau modèle<br><small style="font:400 13px var(--f-body);opacity:.85">téléphone, tablette ou ordinateur (puis on scanne les boîtes)</small></button>` : ''}
     <button class="btn ${phones ? 'ghost' : 'huge'}" id="np-cat" style="height:auto;padding:16px">📋 Choisir dans la liste<br><small style="font:400 13px var(--f-body);opacity:.85">produits courants déjà prêts, vous tapez seulement les prix</small></button>
     <button class="btn ghost" id="np-hand" style="padding:14px">✍️ Créer un produit à la main</button>
     <button class="btn ghost" id="cancel">Annuler</button></div></div>`;
@@ -1602,68 +2037,13 @@ function newProductChoice() {
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#np-cat').onclick = () => { closeSheet(); S.catMode = 'pick'; S.catPick = S.catPick || new Map(); window.scrollTo(0, 0); viewProducts(); };
   $('#np-hand').onclick = () => openSheet('new');
-  const nph = $('#np-phone'); if (nph) nph.onclick = () => phoneForm({});
+  const nph = $('#np-phone'); if (nph) nph.onclick = () => modelForm({});
 }
 
-// Téléphones : le commerçant écrit lui-même marque, modèle, mémoire et couleur (boutons rapides pour aller vite).
-// Le nom du produit est composé tout seul : « Tecno Spark 20 · 128 Go · Noir ».
+// Boutons rapides des modèles de téléphones (voir « Nouveau modèle »).
 const PH_BRANDS = ['Samsung', 'Tecno', 'Itel', 'Infinix', 'iPhone', 'Xiaomi', 'Nokia', 'Huawei', 'Oppo'];
 const PH_MEM = ['32', '64', '128', '256', '512'];
 const PH_COLORS = ['Noir', 'Bleu', 'Blanc', 'Gris', 'Vert', 'Or', 'Violet'];
-const phoneName = v => [[v.brand, v.model].filter(Boolean).join(' '), v.mem ? v.mem + ' Go' : '', v.color].filter(Boolean).join(' · ');
-function phoneForm(v) {
-  v = { kind: 'Smartphones', brand: '', model: '', mem: '', color: '', sell: '', buy: '', qty: 1, ...v };
-  const chips = (key, list, suffix) => `<div class="chips" style="flex-wrap:wrap">${list.map(x => `<button type="button" data-ph="${key}" data-v="${esc(x)}" aria-pressed="${v[key] === x}">${esc(x)}${suffix || ''}</button>`).join('')}</div>`;
-  const big = 'style="font-size:18px;height:50px;font-weight:700"';
-  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Nouveau téléphone">
-    <h2>📱 Nouveau téléphone</h2>
-    <div class="modes" style="grid-template-columns:repeat(2,minmax(0,1fr))" role="radiogroup" aria-label="Type">
-      <button type="button" data-kind="Smartphones" aria-pressed="${v.kind === 'Smartphones'}"><span class="mi">📱</span>Tactile</button>
-      <button type="button" data-kind="Téléphones simples" aria-pressed="${v.kind === 'Téléphones simples'}"><span class="mi">☎️</span>Simple</button></div>
-    <label>Marque<input id="ph-brand" value="${esc(v.brand)}" maxlength="40" placeholder="ex. Tecno" ${big}></label>${chips('brand', PH_BRANDS)}
-    <label>Modèle<input id="ph-model" value="${esc(v.model)}" maxlength="40" placeholder="ex. Spark 20"></label>
-    <label>Mémoire (Go)<input id="ph-mem" value="${esc(v.mem)}" inputmode="numeric" maxlength="5" placeholder="${v.kind === 'Smartphones' ? 'ex. 128' : 'facultatif'}"></label>${chips('mem', PH_MEM, ' Go')}
-    <label>Couleur<input id="ph-color" value="${esc(v.color)}" maxlength="30" placeholder="ex. Noir"></label>${chips('color', PH_COLORS)}
-    <div class="metric" style="text-align:center"><span>Nom du produit</span><b id="ph-name" style="font-size:18px">${esc(phoneName(v) || '…')}</b></div>
-    <div class="row"><label>Prix de vente<input id="ph-sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.sell)}" ${big}></label>
-      <label>Prix d'achat (facultatif)<input id="ph-buy" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.buy)}" ${big}></label></div>
-    ${qtyField('f-qty', v.qty, 1, 'Combien en avez-vous ?')}
-    <button class="btn huge" type="submit">✓ Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
-  const read = () => { v.brand = $('#ph-brand').value.trim(); v.model = $('#ph-model').value.trim(); v.mem = $('#ph-mem').value.replace(/[^0-9]/g, '');
-    v.color = $('#ph-color').value.trim(); v.sell = $('#ph-sell').value; v.buy = $('#ph-buy').value; v.qty = $('#f-qty').value;
-    $('#ph-name').textContent = phoneName(v) || '…';
-    document.querySelectorAll('[data-ph]').forEach(b => b.setAttribute('aria-pressed', v[b.dataset.ph] === b.dataset.v)); };
-  $('#sheet').addEventListener('input', read);
-  document.querySelectorAll('[data-ph]').forEach(b => b.onclick = () => { $('#ph-' + b.dataset.ph).value = b.dataset.v; read(); });
-  document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { read(); v.kind = b.dataset.kind; phoneForm(v); });
-  document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { const i = $('#' + b.dataset.st); i.value = Math.max(0, (Number(i.value) || 0) + Number(b.dataset.d)); read(); });
-  $('#cancel').onclick = closeSheet;
-  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
-  $('#sheet').onsubmit = async ev => {
-    ev.preventDefault(); read();
-    const name = phoneName(v), sell = Math.round(Number(v.sell)), buy = v.buy === '' ? null : Math.round(Number(v.buy)), q = Number(v.qty) || 0;
-    if (!v.brand && !v.model) return toast('Tapez au moins la marque ou le modèle.', true);
-    if (v.sell === '' || !(sell > 0)) return toast('Tapez le prix de vente.', true);
-    if (!(q >= 0) || q !== Math.trunc(q)) return toast('Quantité invalide (nombre entier).', true);
-    const btn = ev.target.querySelector('[type=submit]');
-    if (buy != null && sell < buy && !btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = 'Confirmer (vente à perte)'; return toast(`Attention : vente ${money(sell)} < achat ${money(buy)}.`, true); }
-    btn.disabled = true;
-    const { error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: name, p_category: v.kind, p_unit: 'piece',
-      p_buy_price: buy, p_sell_price: sell, p_initial_qty: q, p_alert: 0, p_barcode: null });
-    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
-    await loadProducts(); S.summary = null;
-    $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Téléphone enregistré">
-      <h2>✅ Enregistré</h2><div class="metric" style="text-align:center"><b style="font-size:18px">${esc(name)}</b><span>${esc(money(sell))} · ${esc(String(q))} en stock</span></div>
-      <button class="btn" id="ph-again-color">🎨 Même modèle, autre couleur</button>
-      <button class="btn ghost" id="ph-again-mem">💾 Même modèle, autre mémoire</button>
-      <button class="btn ghost" id="ph-new">📱 Un autre téléphone</button>
-      <button class="btn ghost" id="ph-done">Terminé</button></div></div>`;
-    $('#ph-again-color').onclick = () => phoneForm({ ...v, color: '', qty: 1 });
-    $('#ph-again-mem').onclick = () => phoneForm({ ...v, mem: '', sell: '', buy: '', qty: 1 });
-    $('#ph-new').onclick = () => phoneForm({ kind: v.kind });
-    $('#ph-done').onclick = () => { closeSheet(); draw(); };
-  };
-}
 
 // Étape 1 : toucher les produits vendus dans la boutique.
 function viewCatalog() {
@@ -1759,13 +2139,33 @@ function viewProducts() {
   $('#view').innerHTML = `${S.countPending === 'submitted' && S.role === 'owner' ? '<div class="banner">Un comptage du gérant attend votre validation : touchez « Comptage ».</div>' : S.countPending === 'open' ? '<div class="banner">Un comptage est en cours : touchez « Comptage » pour le continuer.</div>' : ''}
     ${mgr ? `<button class="btn huge" id="newp" ${canWrite() ? '' : 'disabled'}>＋ Nouveau produit</button>
       <div class="row"><button class="btn ghost" id="count" ${S.offline ? 'disabled' : ''}>🔢 Comptage</button><button class="btn ghost" id="labels">🏷️ Étiquettes</button></div>` : ''}
+    ${canTrack() ? `<div class="row">${mgr ? `<button class="btn" id="arrive" ${canWrite() && !S.offline ? '' : 'disabled'}>📥 Arrivage par scan</button>` : ''}
+      <button class="btn ghost" id="findu" ${S.offline ? 'disabled' : ''}>🔎 Retrouver un appareil</button></div>` : ''}
     <input id="pq" type="search" placeholder="🔍 Chercher un produit" value="${esc(S.pq || '')}" autocomplete="off" aria-label="Chercher un produit" style="height:50px;font-size:16px">
     <div class="chips" role="group" aria-label="Filtre"><button aria-pressed="${S.pFilter === 'all'}" data-pf="all">Tous (${S.products.length})</button>
       <button aria-pressed="${S.pFilter === 'low'}" data-pf="low">⚠️ À recommander (${low})</button></div>
+    <div id="pfolder-head"></div>
     <div class="plist" id="prod-list"></div>`;
+  const cats = orderedCats(), folders = cats.length > 1 && S.products.length > 9;
+  if (S.pCat && !cats.includes(S.pCat)) S.pCat = '';
   const draw1 = () => {
     const t = (S.pq || '').trim().toLowerCase();
-    const list = S.products.filter(p => (S.pFilter !== 'low' || isLow(p)) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t));
+    // Beaucoup de produits : d'abord les rayons en grosses cases (comme dans Vendre).
+    if (folders && !S.pCat && !t && S.pFilter === 'all') {
+      $('#pfolder-head').innerHTML = '';
+      $('#prod-list').className = 'htiles';
+      $('#prod-list').innerHTML = cats.map(c => { const l = S.products.filter(p => p.category === c), lo = l.filter(isLow).length;
+        return `<button class="htile" data-pcat="${esc(c)}" style="min-height:118px"><span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${folderIc(c)}</span>
+          ${lo ? `<span class="hbadge warn">${lo} bas</span>` : ''}<span class="hl">${esc(c)}</span><span class="muted" style="font-size:12.5px;font-weight:400">${l.length} produit${l.length > 1 ? 's' : ''}</span></button>`; }).join('');
+      document.querySelectorAll('[data-pcat]').forEach(b => b.onclick = () => { S.pCat = b.dataset.pcat; draw1(); window.scrollTo(0, 0); });
+      return;
+    }
+    $('#prod-list').className = 'plist';
+    $('#pfolder-head').innerHTML = folders && S.pCat && !t && S.pFilter === 'all' ? `<div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="pfolder-back" style="flex:0 0 auto">‹ Rayons</button>
+      <h2 style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${folderIc(S.pCat)} ${esc(S.pCat)}</h2></div>` : '';
+    const pb = $('#pfolder-back'); if (pb) pb.onclick = () => { S.pCat = ''; draw1(); };
+    const inCat = p => !folders || !S.pCat || t || S.pFilter !== 'all' || p.category === S.pCat;
+    const list = S.products.filter(p => inCat(p) && (S.pFilter !== 'low' || isLow(p)) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t));
     $('#prod-list').innerHTML = list.map(p => `<button class="prow" data-p="${esc(p.id)}">
         ${prodIcon(p, 48)}
         <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(p.name)}</span><br><span class="sub">${esc(money(p.sell_price))}</span></span>
@@ -1780,6 +2180,8 @@ function viewProducts() {
   const n = $('#newp'); if (n) n.onclick = newProductChoice;
   const lb = $('#labels'); if (lb) lb.onclick = openLabels;
   const ct = $('#count'); if (ct) ct.onclick = () => { S.tab = 'count'; draw(); };
+  const ar = $('#arrive'); if (ar) ar.onclick = () => arrival({});
+  const fu = $('#findu'); if (fu) fu.onclick = findUnitSheet;
 }
 
 // Fiche d'un produit : grosses actions (arrivage, modifier, perte).
@@ -1796,17 +2198,32 @@ function productSheet(pid) {
         : mgr ? `<div class="metric" style="grid-column:1/-1"><span>Prix d'achat</span><b style="font-size:15px;color:var(--muted)">inconnu · touchez « Modifier » pour l'ajouter et voir votre gain</b></div>` : ''}
     </div>
     ${isLow(p) ? `<div class="banner" style="margin:0">⚠️ Stock bas (alerte à ${esc(qty(p.alert_threshold))}) : pensez à recommander.</div>` : ''}
-    ${mgr ? `<div class="bigacts">
+    ${isTracked(p) ? `<details class="more"><summary>📦 Appareils en stock (${unitsOf(p.id).length})</summary><div class="plist" style="margin-top:8px">${unitsOf(p.id).map(u =>
+      `<button class="prow" data-unit-code="${esc(u.serial)}"><span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(u.color || 'Couleur ?')}</span><br><span class="sub">${esc(codeName(p.track_kind))} ${esc(u.serial)}</span></span>
+        <span class="sub">${Number(u.warranty_months) ? '🛡️ ' + esc(warrTxt(u.warranty_months)) : ''}</span></button>`).join('') || '<p class="muted" style="margin:0">Aucun.</p>'}</div></details>
+      ${Number(p.stock_qty) !== unitsOf(p.id).length && mgr ? `<div class="banner" style="margin:0">Stock ${esc(qty(p.stock_qty))}, appareils scannés ${unitsOf(p.id).length}. ${Number(p.stock_qty) > unitsOf(p.id).length ? '<button class="btn small" id="pa-exist">Scanner les boîtes déjà en stock</button>' : ''}</div>` : ''}` : ''}
+    ${mgr && isTracked(p) ? `<div class="bigacts">
+      <button class="btn" id="pa-arr" ${canWrite() && !S.offline ? '' : 'disabled'}><span>📥</span>Arrivage<small>scanner les boîtes</small></button>
+      <button class="btn ghost" id="pa-edit" ${canWrite() ? '' : 'disabled'}><span>✏️</span>Modifier<small>prix, nom…</small></button>
+      <button class="btn ghost" id="pa-find" ${S.offline ? 'disabled' : ''}><span>🔎</span>Un appareil<small>panne, vol, garantie</small></button>
+      <button class="btn ghost" id="pa-sell"><span>🛒</span>Vendre<small>scanner la boîte</small></button></div>`
+    : mgr ? `<div class="bigacts">
       <button class="btn" id="pa-recv" ${canWrite() ? '' : 'disabled'}><span>📥</span>Arrivage<small>j'ai reçu de la marchandise</small></button>
       <button class="btn ghost" id="pa-edit" ${canWrite() ? '' : 'disabled'}><span>✏️</span>Modifier<small>prix, nom…</small></button>
       <button class="btn ghost" id="pa-adj" ${canWrite() ? '' : 'disabled'}><span>➖</span>Perte ou correction<small>cassé, volé, erreur…</small></button>
       <button class="btn ghost" id="pa-sell"><span>🛒</span>Vendre<small>ajouter au panier</small></button></div>`
       : '<button class="btn" id="pa-sell">🛒 Ajouter au panier</button>'}
+    ${mgr && !isTracked(p) && devType(p.category) && p.unit === 'piece' && canWrite() && !S.offline ? '<button class="btn ghost" id="pa-track">🔢 Suivre chaque appareil par son IMEI</button>' : ''}
     ${mgr && p.barcode ? `<div class="muted" style="font-size:12.5px">Code ${esc(p.barcode)}</div>` : ''}
     <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
-  $('#pa-sell').onclick = () => { closeSheet(); if (Number(p.stock_qty) <= 0 && !S.offline) return toast('Stock épuisé : ' + p.name, true); addToCart(p.id); go('sale'); };
+  $('#pa-sell').onclick = () => { closeSheet(); if (Number(p.stock_qty) <= 0 && !S.offline) return toast('Stock épuisé : ' + p.name, true); if (isTracked(p)) { go('sale'); return unitPicker(p.id); } addToCart(p.id); go('sale'); };
+  const pa = $('#pa-arr'); if (pa) pa.onclick = () => arrival({ pid: p.id });
+  const pe = $('#pa-exist'); if (pe) pe.onclick = () => arrival({ pid: p.id, existing: true });
+  const pf = $('#pa-find'); if (pf) pf.onclick = findUnitSheet;
+  const pt = $('#pa-track'); if (pt) pt.onclick = () => trackSheet(p);
+  document.querySelectorAll('[data-unit-code]').forEach(b => b.onclick = () => unitSheet(b.dataset.unitCode));
   const r = $('#pa-recv'); if (r) r.onclick = () => openSheet('recv', pid);
   const e = $('#pa-edit'); if (e) e.onclick = () => openSheet('edit', pid);
   const a = $('#pa-adj'); if (a) a.onclick = () => openSheet('adj', pid);
@@ -2023,7 +2440,7 @@ function countStartScreen(past) {
 
 function countProducts() {
   const cat = S.count.c.category;
-  return S.products.filter(p => !cat || p.category === cat);
+  return S.products.filter(p => (!cat || p.category === cat) && !isTracked(p));   // appareils : contrôlés par scan
 }
 
 function countEntryScreen() {
@@ -2720,9 +3137,16 @@ async function convertSheet(g) {
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Transformer en vente">
     <h2>Vente du devis ${esc(quoteNo(q.quote_no))}</h2>
     <p class="muted" style="margin:0;font-size:13.5px">${q.expired ? 'Devis expiré : prix du jour.' : 'Prix du devis.'} Le client peut prendre une partie maintenant et le reste plus tard.</p>
-    ${rest.map(l => `<label>${esc(l.name)} (reste ${esc(plainQty(Number(l.quantity) - Number(l.qty_taken)))} ${esc(UNITS[l.unit] || '')})
+    ${rest.map(l => { const tp = S.products.find(p => p.id === l.product_id && isTracked(p));
+      // Appareil à numéro : on coche (ou on scanne) les boîtes remises au client.
+      if (tp) return `<fieldset style="border:1px solid var(--line);border-radius:12px;padding:10px;display:grid;gap:6px;min-width:0"><legend style="font-weight:600;padding:0 4px">${esc(l.name)} (reste ${esc(plainQty(Number(l.quantity) - Number(l.qty_taken)))})</legend>
+        <input type="hidden" data-cq="${esc(l.product_id)}" data-max="${esc(Number(l.quantity) - Number(l.qty_taken))}" value="0">
+        ${unitsOf(tp.id).map(u => `<label style="display:flex;align-items:center;gap:10px;font-size:14px"><input type="checkbox" data-cu="${esc(tp.id)}" value="${esc(u.serial)}" style="width:22px;height:22px;margin:0;flex:0 0 auto">
+          <span>${esc(u.color || 'Couleur ?')} · <span class="muted">${esc(codeName(tp.track_kind))} ${esc(shortCode(u.serial))}</span></span></label>`).join('') || '<span class="muted">Aucun appareil en stock.</span>'}
+        ${canScan() && unitsOf(tp.id).length ? `<button class="btn ghost small" type="button" data-cus="${esc(tp.id)}">📷 Scanner les boîtes</button>` : ''}</fieldset>`;
+      return `<label>${esc(l.name)} (reste ${esc(plainQty(Number(l.quantity) - Number(l.qty_taken)))} ${esc(UNITS[l.unit] || '')})
       <input type="number" inputmode="decimal" min="0" step="${WHOLE.includes(l.unit) ? 1 : 0.001}" max="${esc(Number(l.quantity) - Number(l.qty_taken))}"
-        value="${esc(Number(l.quantity) - Number(l.qty_taken))}" data-cq="${esc(l.product_id)}"></label>`).join('')}
+        value="${esc(Number(l.quantity) - Number(l.qty_taken))}" data-cq="${esc(l.product_id)}"></label>`; }).join('')}
     <div class="total"><span>Total estimé</span><span class="num" id="cq-total"></span></div>
     ${adv ? `<label style="display:flex;align-items:center;gap:10px;font-size:14.5px"><input id="cq-adv" type="checkbox" checked style="width:22px;height:22px;margin:0">
       Prendre sur l'avance de ${esc(cust.name)} (${money(adv)})</label>` : ''}
@@ -2730,7 +3154,10 @@ async function convertSheet(g) {
       <label>Paiement<select id="cq-pay">${Object.entries(PAY).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label></div>
     <div class="row"><button class="btn" type="submit">Valider la vente</button><button class="btn ghost" type="button" id="cancel">Retour</button></div></form></div>`;
   const price = l => q.expired ? Number((S.products.find(p => p.id === l.product_id) || {}).sell_price || l.current_price) : Number(l.unit_price);
-  const pick = () => [...document.querySelectorAll('[data-cq]')].map(i => ({ product_id: i.dataset.cq, quantity: Number(i.value) || 0 })).filter(x => x.quantity > 0);
+  const serialsOf = pid => [...document.querySelectorAll(`[data-cu="${pid}"]:checked`)].map(c => c.value);
+  const pick = () => [...document.querySelectorAll('[data-cq]')].map(i => i.type === 'hidden'
+    ? { product_id: i.dataset.cq, quantity: serialsOf(i.dataset.cq).length, serials: serialsOf(i.dataset.cq) }
+    : { product_id: i.dataset.cq, quantity: Number(i.value) || 0 }).filter(x => x.quantity > 0);
   const est = () => {
     const items = pick(), all = items.length === rest.length && items.every(x => { const l = rest.find(r => r.product_id === x.product_id); return x.quantity >= Number(l.quantity) - Number(l.qty_taken); });
     let sub = 0, part = 0;
@@ -2746,6 +3173,15 @@ async function convertSheet(g) {
   };
   upd();
   document.querySelectorAll('[data-cq]').forEach(i => i.oninput = upd);
+  document.querySelectorAll('[data-cu]').forEach(c => c.onchange = () => {
+    const h = document.querySelector(`[data-cq="${c.dataset.cu}"]`);
+    if (serialsOf(c.dataset.cu).length > Number(h.dataset.max)) { c.checked = false; toast('Le devis n\'en prévoit pas plus.', true); }
+    h.value = serialsOf(c.dataset.cu).length; upd(); });
+  document.querySelectorAll('[data-cus]').forEach(b => b.onclick = () => openScanner('Scanner les boîtes', code => {
+    const u = unitByCode(normCode(code)), c = u && document.querySelector(`[data-cu="${b.dataset.cus}"][value="${u.serial}"]`);
+    if (!c) { toast('Cet appareil n\'est pas un ' + (S.products.find(p => p.id === b.dataset.cus) || {}).name + ' en stock.', true); return true; }
+    if (!c.checked) { c.checked = true; c.onchange(); }
+    return true; }));
   const ca = $('#cq-adv'); if (ca) ca.onchange = upd;
   $('#cancel').onclick = () => quoteSheet(q.id);
   $('#sheet').onsubmit = async ev => {
@@ -2757,7 +3193,7 @@ async function convertSheet(g) {
     if (paid < t && !canCredit() && t - paid > adv) return toast(adv ? `Avance insuffisante : il manque ${money(t - paid - adv)}.` : 'Vente à crédit non autorisée pour vous.', true);
     const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
     const all = items.length === rest.length && items.every(x => { const l = rest.find(r => r.product_id === x.product_id); return x.quantity >= Number(l.quantity) - Number(l.qty_taken); });
-    const { data, error } = await sb.rpc('convert_quote', { p_quote: q.id, p_items: all ? null : items,
+    const { data, error } = await sb.rpc('convert_quote', { p_quote: q.id, p_items: all && !items.some(x => x.serials) ? null : items,
       p_paid: paid >= t ? null : paid, p_payment_method: $('#cq-pay').value, p_client_ref: ref });
     if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
     S.quotes = null; S.sales = null; S.summary = null; S.customers = null;
@@ -2768,7 +3204,7 @@ async function convertSheet(g) {
 }
 
 /* ===== Onglet Historique ===== */
-const SALE_COLS = 'id,invoice_no,discount,advance_used,quote_id,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(quantity,unit_price,line_total,products(name,unit))';
+const SALE_COLS = 'id,invoice_no,discount,advance_used,quote_id,offline,offline_ref,client_created_at,created_at,created_by,total,paid,status,customer_name,payment_method,cancel_reason,sale_items(product_id,quantity,unit_price,line_total,products(name,unit,track_kind))';
 async function viewHistory() {
   if (S.histMode === 'quotes' && !S.offline) return viewQuotes();
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
@@ -2937,7 +3373,11 @@ async function viewTeam() {
         <span style="font-size:14px">Permettre d'ouvrir avec l'empreinte digitale</span></div>
       <p class="muted" style="margin:0;font-size:12.5px">Avec l'empreinte, toutes les empreintes enregistrées dans le téléphone de l'employé ouvrent l'application.</p>
       <button class="btn ghost small" id="lk-save" ${canWrite() ? '' : 'disabled'}>Enregistrer</button>
-    </section>${offlineAdminHtml()}`;
+    </section>
+    ${canTrack() && S.role === 'owner' ? `<section class="card stack"><h2>🛡️ Garantie des appareils</h2>
+      <p class="muted" style="margin:0;font-size:13.5px">Garantie proposée à l'arrivage de chaque téléphone ou ordinateur. Vous pouvez la changer boîte par boîte.</p>
+      <label>Garantie proposée<select id="wr-def">${[...new Set([...WARR, S.shop.warranty || 0])].sort((a, b) => a - b).map(w => `<option value="${w}" ${w === (S.shop.warranty || 0) ? 'selected' : ''}>${esc(warrTxt(w))}</option>`).join('')}</select></label>
+      <button class="btn ghost small" id="wr-save" ${canWrite() ? '' : 'disabled'}>Enregistrer</button></section>` : ''}${offlineAdminHtml()}`;
   bindOfflineAdmin();
   $('#lk-save').onclick = async () => {
     const m = Number($('#lk-min').value), bio = $('#lk-bio').checked;
@@ -2945,6 +3385,12 @@ async function viewTeam() {
     if (error) return toast(/set_lock_settings|p_seconds/.test(error.message || '') ? 'Installez d\'abord la mise à jour 013 dans Supabase.' : cleanErr(error), true);
     S.shop.lockSec = m; S.shop.bioAllowed = bio; saveCache();
     toast('Réglages enregistrés. Les employés les reçoivent à leur prochaine ouverture.');
+  };
+  const wr = $('#wr-save'); if (wr) wr.onclick = async () => {
+    const m = Number($('#wr-def').value);
+    const { error } = await sb.rpc('set_default_warranty', { p_shop: S.shop.id, p_months: m });
+    if (error) return toast(/set_default_warranty/.test(error.message || '') ? 'Installez d\'abord la mise à jour 016 dans Supabase.' : cleanErr(error), true);
+    S.shop.warranty = m; toast('Garantie proposée : ' + warrTxt(m));
   };
   $('#addm').onclick = openAddMember;
   $('#editshop').onclick = openShopProfile;
@@ -3112,6 +3558,11 @@ const dtFull = s => { const d = new Date(s); return `${p2(d.getDate())}/${p2(d.g
 const invNo = n => 'F-' + String(n).padStart(4, '0');
 const GREEN = [0.12, 0.42, 0.29], GREY = [0.36, 0.4, 0.37], RED = [0.66, 0.2, 0.12];
 
+// Une ligne par appareil vendu : « IMEI 3512… · Noir · garantie jusqu'au 20/04/2027 ».
+const unitLine = u => [`${u.kind === 'serial' ? 'N° de série' : 'IMEI'} ${u.serial}`, u.color || '',
+  u.until ? 'garantie jusqu\'au ' + dDay(u.until) : u.months ? `garantie ${u.months} mois` : 'sans garantie'].filter(Boolean).join(' · ');
+const hasUnits = inv => inv.lines.some(l => l.units && l.units.length);
+
 function invoicePdf(inv) {
   const pdf = newPdf(), L = 40, R = 555, X_QTY = 372, X_PU = 462, X_AMT = R - 6;
   let top;
@@ -3148,9 +3599,11 @@ function invoicePdf(inv) {
   header(true);
   for (const l of inv.lines) {
     const wrapped = pdfWrap(l.name, false, 10, X_QTY - L - 8 - 70);
-    const h = wrapped.length * 13 + 9;
+    const sub = (l.units || []).flatMap(u => pdfWrap(unitLine(u), false, 8.5, R - L - 20));
+    const h = wrapped.length * 13 + sub.length * 11 + 9;
     if (top + h > 740) header(false);
     wrapped.forEach((t, i) => pdf.text(L + 8, top + 15 + i * 13, t, { size: 10 }));
+    sub.forEach((t, i) => pdf.text(L + 14, top + 15 + wrapped.length * 13 + i * 11, t, { size: 8.5, color: GREY }));
     pdf.text(X_QTY, top + 15, plainQty(l.qty) + (l.unit ? ' ' + l.unit : ''), { size: 10, align: 'right' });
     pdf.text(X_PU, top + 15, plainMoney(l.price), { size: 10, align: 'right' });
     pdf.text(X_AMT, top + 15, plainMoney(l.total), { size: 10, align: 'right' });
@@ -3187,18 +3640,23 @@ function invoicePdf(inv) {
       pdf.text(X_AMT, top, plainMoney(inv.total - inv.paid - (inv.advance || 0)) + ' FCFA', { size: 11, bold: true, align: 'right', color: RED });
     }
   }
+  if (inv.kind !== 'quote' && hasUnits(inv)) {
+    pdf.text(L, 768, 'Gardez cette facture : elle prouve votre achat (garantie, vol). Activez « Localiser mon appareil » sur votre téléphone.', { size: 8.5, color: GREY });
+  }
   if (inv.shop.footer) pdf.text(pdf.W / 2, 790, inv.shop.footer, { size: 10, align: 'center', color: GREY });
   pdf.text(pdf.W / 2, 815, 'Établi avec Bara Gestion', { size: 7.5, align: 'center', color: [0.6, 0.64, 0.61] });
   return pdf.build((inv.kind === 'quote' ? 'Devis ' : 'Facture ') + inv.num);
 }
 
 function invoiceText(inv) {
-  const rows = inv.lines.map(l => `- ${plainQty(l.qty)}${l.unit ? ' ' + l.unit : ''} ${l.name} : ${plainMoney(l.total)} FCFA`);
+  const rows = inv.lines.flatMap(l => [`- ${plainQty(l.qty)}${l.unit ? ' ' + l.unit : ''} ${l.name} : ${plainMoney(l.total)} FCFA`,
+    ...(l.units || []).map(u => `   ${unitLine(u)}`)]);
   const q = inv.kind === 'quote', rest = inv.total - inv.paid - (inv.advance || 0);
   return [`${inv.shop.name}`, `${q ? 'Devis' : 'Facture'} ${inv.num} du ${dtFull(inv.date)}`, ...(inv.ref2 ? [`Réf. hors ligne : ${inv.ref2}`] : []), ...rows, ...(inv.discount > 0 ? [`Remise : -${plainMoney(inv.discount)} FCFA`] : []), `Total : ${plainMoney(inv.total)} FCFA`,
     ...(q ? [`Valable jusqu'au ${dDay(inv.valid)}`] : []),
     ...(!q && inv.advance > 0 ? [`Pris sur l'avance : ${plainMoney(inv.advance)} FCFA`] : []),
     ...(!q && rest > 0 ? [`Reste à payer : ${plainMoney(rest)} FCFA`] : []),
+    ...(!q && hasUnits(inv) ? ['', 'Gardez cette facture : elle prouve votre achat (garantie, vol).'] : []),
     ...(inv.shop.footer ? ['', inv.shop.footer] : [])].join('\n');
 }
 /* ===== PDF:end ===== */
@@ -3280,12 +3738,10 @@ const findByCode = code => S.products.find(p => p.barcode && p.barcode.toUpperCa
 // Caisse : chaque produit scanné s'ajoute au panier, on peut enchaîner.
 function scanToCart() {
   openScanner('Scanner les produits', code => {
-    const p = findByCode(code);
-    const m = $('#scan-msg');
-    if (!p) { if (m) m.textContent = 'Code inconnu : ' + code; toast('Aucun produit avec le code ' + code + '.', true); return true; }
-    const before = S.cart.get(p.id) || 0;
-    addToCart(p.id);
-    if ((S.cart.get(p.id) || 0) > before && m) m.textContent = `Ajouté : ${p.name} (${qty(S.cart.get(p.id))} dans le panier)`;
+    const m = $('#scan-msg'), u = unitByCode(normCode(code)), p = u ? S.products.find(x => x.id === u.product_id) : findByCode(code);
+    if (p && isTracked(p) && !u) { toast(p.name + ' : scannez le code IMEI de la boîte (pas le code-barres du modèle).', true); return true; }
+    if (sellByCode(code) && m && p) m.textContent = `Ajouté : ${p.name}${u && u.color ? ' · ' + u.color : ''} (${qty(S.cart.get(p.id))} dans le panier)`;
+    else if (m) m.textContent = 'Code non ajouté : ' + code;
     return true;
   });
 }
@@ -3402,12 +3858,19 @@ async function loadSale(id) {
 async function buildInvoice(s) {
   await ensureNames();
   const seller = s.created_by === S.user.id ? S.shop.who : ((S.names && S.names[s.created_by]) || '');
+  // Appareils vendus : numéro, couleur, fin de garantie (sur la facture du client).
+  let units = {};
+  if (s.id && !S.offline && (s.sale_items || []).some(i => i.products && i.products.track_kind)) {
+    const { data } = await sb.from('product_units').select('product_id,serial,color,warranty_until').eq('sale_id', s.id).order('serial');
+    (data || []).forEach(u => { (units[u.product_id] = units[u.product_id] || []).push({ serial: u.serial, color: u.color, until: u.warranty_until,
+      kind: ((s.sale_items || []).find(i => i.product_id === u.product_id) || {}).products?.track_kind }); });
+  }
   return {
     shop: { name: S.shop.name, phone: S.shop.phone || '', address: S.shop.address || '', footer: S.shop.footer || '' },
     no: s.invoice_no, num: s.invoice_no ? invNo(s.invoice_no) : s.offline_ref, ref2: s.invoice_no && s.offline_ref ? s.offline_ref : '',
     date: s.client_created_at || s.created_at, seller, customer: s.customer_name || '', pay: PAY[s.payment_method] || '',
     lines: (s.sale_items || []).map(i => ({ name: i.products?.name || 'Produit', unit: UNITS[i.products?.unit] || '',
-      qty: i.quantity, price: i.unit_price, total: i.line_total })),
+      qty: i.quantity, price: i.unit_price, total: i.line_total, units: i.units || units[i.product_id] || [] })),
     total: s.total, paid: s.paid, discount: s.discount || 0, advance: s.advance_used || 0
   };
 }
@@ -3453,7 +3916,7 @@ async function openInvoice(saleOrId, opts = {}) {
       ${inv.customer ? chip('👤 ' + esc(inv.customer)) : ''}${inv.advance > 0 ? chip('Avance : ' + esc(money(inv.advance))) : ''}
       ${rest > 0 && !cancelled ? chip('Reste : ' + esc(money(rest)), 'bad') : ''}${inv.discount > 0 ? chip('Remise : ' + esc(money(inv.discount)), 'warn') : ''}</div>
     <div class="card" style="padding:4px 12px">${inv.lines.map(l => `<div class="row" style="flex-wrap:nowrap;padding:7px 0;border-bottom:1px solid var(--line);font-size:14.5px">
-      <span style="flex:1 1 auto;min-width:0"><b>${esc(plainQty(l.qty))}</b> × ${esc(l.name)}</span><span class="num" style="flex:0 0 auto">${esc(money(l.total))}</span></div>`).join('')}</div>
+      <span style="flex:1 1 auto;min-width:0"><b>${esc(plainQty(l.qty))}</b> × ${esc(l.name)}${(l.units || []).map(u => `<br><span class="muted" style="font-size:12.5px">${esc(unitLine(u))}</span>`).join('')}</span><span class="num" style="flex:0 0 auto">${esc(money(l.total))}</span></div>`).join('')}</div>
     ${inv.seller || inv.ref2 ? `<div class="muted" style="font-size:12.5px;text-align:center">${inv.seller ? 'Vendu par ' + esc(inv.seller) : ''}${inv.ref2 ? ' · réf. ' + esc(inv.ref2) : ''}</div>` : ''}
     ${cancelled && sale.cancel_reason ? `<div class="banner bad" style="margin:0">Annulée : ${esc(sale.cancel_reason)}</div>` : ''}
     ${incomplete && S.role === 'owner' ? `<div class="banner" style="margin:0">Ajoutez l'adresse et le téléphone de la boutique (Plus › Équipe, « Fiche de la boutique ») pour la facture.</div>` : ''}
