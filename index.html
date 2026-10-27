@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-27a';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-27b';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1632,6 +1632,17 @@ function unitPicker(pid) {
   const sc = $('#up-scan'); if (sc) sc.onclick = () => { closeSheet(); scanToCart(); };
 }
 
+// Boîte d'appareil : on garde l'IMEI valable (ou un numéro de série avec des lettres) ; on ignore le
+// code-barres du modèle (EAN, 8 à 14 chiffres), qui est le même sur toutes les boîtes.
+const devPick = codes => {
+  const n = codes.map(c => normCode(c.replace(/^(IMEI|S\/?N|SN|SERIAL)[^0-9A-Z]*/i, '')));
+  return n.find(imeiOk) || n.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c) && /^[0-9A-Z][0-9A-Z/.-]{3,39}$/.test(c)) || null;
+};
+const DEV_HINT = 'Visez le code marqué IMEI (ou S/N pour un ordinateur).';
+const DEV_MISS = 'Ce code est celui du modèle : visez le code marqué IMEI ou S/N.';
+// Vente : un appareil en stock d'abord, sinon un produit (accessoire), sinon un IMEI.
+const salePick = codes => codes.find(c => unitByCode(normCode(c))) || codes.find(c => findByCode(c)) || devPick(codes);
+
 /* --- Nouveau modèle : type, marque, modèle, mémoire. La couleur se note à l'arrivage, boîte par boîte. --- */
 const PC_BRANDS = ['HP', 'Dell', 'Lenovo', 'Acer', 'Asus', 'Apple', 'Toshiba'];
 const PC_RAM = ['4', '8', '16', '32'], PC_DISK = ['128 Go', '256 Go', '512 Go', '1 To'];
@@ -1724,7 +1735,7 @@ function arrivalStart(msg) {
   $('#ar-done').onclick = done;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') done(); };
   $('#sheet').onsubmit = ev => { ev.preventDefault(); const c = $('#ar-code').value; if (c.trim()) arrivalCode(c); };
-  const sc = $('#ar-scan'); if (sc) sc.onclick = () => openScanner('Arrivage : scannez la boîte', code => { arrivalCode(code); return false; });
+  const sc = $('#ar-scan'); if (sc) sc.onclick = () => openScanner('Arrivage : scannez la boîte', code => { arrivalCode(code); return false; }, { pick: devPick, hint: DEV_HINT, miss: DEV_MISS });
 }
 async function arrivalCode(raw) {
   const c = normCode(raw);
@@ -1771,7 +1782,7 @@ function arrivalForm(code, extra = {}) {
   const nm = $('#ar-newm'); if (nm) nm.onclick = () => { const k = keep();
     modelForm({ kind: imei ? 'Smartphones' : 'Ordinateurs' }, pid => { if (pid) A.pid = pid; arrivalForm(code, k); }); };
   const s2 = $('#ar-s2scan'); if (s2) s2.onclick = () => openScanner('Scanner le 2e IMEI', c2 => { const v = normCode(c2);
-    if (v === code) { toast('C\'est le même IMEI : scannez l\'autre.', true); return true; } $('#ar-s2').value = v; return false; });
+    if (v === code) { toast('C\'est le même IMEI : scannez l\'autre.', true); return true; } $('#ar-s2').value = v; return false; }, { pick: cs => cs.map(normCode).find(c => imeiOk(c) && c !== code) || null, hint: 'Visez l\'autre code IMEI.' });
   $('#cancel').onclick = () => arrivalStart();
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') arrivalStart(); };
   $('#sheet').onsubmit = async ev => {
@@ -1905,7 +1916,7 @@ function findUnitSheet() {
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#sheet').onsubmit = ev => { ev.preventDefault(); if ($('#fu-code').value.trim()) unitSheet($('#fu-code').value); };
-  const sc = $('#fu-scan'); if (sc) sc.onclick = () => openScanner('Scanner l\'appareil', c => { unitSheet(c); return false; });
+  const sc = $('#fu-scan'); if (sc) sc.onclick = () => openScanner('Scanner l\'appareil', c => { unitSheet(c); return false; }, { pick: devPick, hint: DEV_HINT, miss: DEV_MISS });
   const st = $('#fu-stolen'); if (st) st.onclick = stolenList;
 }
 async function stolenList() {
@@ -3181,7 +3192,7 @@ async function convertSheet(g) {
     const u = unitByCode(normCode(code)), c = u && document.querySelector(`[data-cu="${b.dataset.cus}"][value="${u.serial}"]`);
     if (!c) { toast('Cet appareil n\'est pas un ' + (S.products.find(p => p.id === b.dataset.cus) || {}).name + ' en stock.', true); return true; }
     if (!c.checked) { c.checked = true; c.onchange(); }
-    return true; }));
+    return true; }, { pick: cs => cs.find(c => unitByCode(normCode(c))) || devPick(cs), hint: DEV_HINT }));
   const ca = $('#cq-adv'); if (ca) ca.onchange = upd;
   $('#cancel').onclick = () => quoteSheet(q.id);
   $('#sheet').onsubmit = async ev => {
@@ -3680,7 +3691,9 @@ function stopScan() {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stopScan(); });
 
 // onCode(code) renvoie true pour continuer à scanner (mode caisse), false pour fermer.
-async function openScanner(title, onCode) {
+// opts.pick(codes) : parmi les codes vus en même temps (une boîte de téléphone en a plusieurs :
+// code du modèle, IMEI 1, IMEI 2, numéro de série), choisit le bon, ou null pour continuer à chercher.
+async function openScanner(title, onCode, opts = {}) {
   if (!canScan()) {
     return toast('Le scan par la caméra n\'est pas disponible sur ce navigateur. Utilisez Chrome sur Android, ou tapez le code.', true);
   }
@@ -3693,7 +3706,7 @@ async function openScanner(title, onCode) {
       <video id="scan-v" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover"></video>
       <div style="position:absolute;left:8%;right:8%;top:38%;height:24%;border:2px solid #6fcf97;border-radius:8px;box-shadow:0 0 0 999px rgba(0,0,0,.25)"></div>
     </div>
-    <p class="muted" id="scan-msg" style="margin:0;text-align:center">Placez le code-barres dans le cadre.</p>
+    <p class="muted" id="scan-msg" style="margin:0;text-align:center">${esc(opts.hint || 'Placez le code-barres dans le cadre.')}</p>
     <button class="btn ghost" type="button" id="scan-x">Terminer</button></div></div>`;
   document.body.appendChild(host);
   $('#scan-x').onclick = stopScan;
@@ -3703,7 +3716,14 @@ async function openScanner(title, onCode) {
     const formats = SCAN_FORMATS.filter(f => supported.includes(f));
     if (!formats.length) throw new Error('formats');
     me.det = new BarcodeDetector({ formats });
-    me.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    // Image nette et grande : les codes IMEI sont longs et fins (mauvaise lecture en petite image).
+    try {
+      me.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment',
+        width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] } });
+    } catch (e1) {
+      if (e1 && e1.name === 'NotAllowedError') throw e1;
+      me.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    }
     if (me.stopped) { me.stream.getTracks().forEach(t => t.stop()); return; }
     const v = $('#scan-v'); v.srcObject = me.stream; await v.play().catch(() => {});
   } catch (e) {
@@ -3718,7 +3738,9 @@ async function openScanner(title, onCode) {
     try {
       if (v && v.readyState >= 2) {
         const found = await me.det.detect(v);
-        const code = found && found[0] && String(found[0].rawValue || '').trim();
+        const all = (found || []).map(x => String(x.rawValue || '').trim()).filter(Boolean);
+        const code = opts.pick ? (all.length ? opts.pick(all) : null) : all[0];
+        if (!code && all.length && opts.miss) { const m = document.getElementById('scan-msg'); if (m) m.textContent = opts.miss; }
         // Le même code lu plusieurs fois de suite n'est compté qu'une fois (1,5 s d'écart minimum).
         if (code && !(code === me.last && Date.now() - me.lastAt < 1500)) {
           me.last = code; me.lastAt = Date.now();
@@ -3743,7 +3765,7 @@ function scanToCart() {
     if (sellByCode(code) && m && p) m.textContent = `Ajouté : ${p.name}${u && u.color ? ' · ' + u.color : ''} (${qty(S.cart.get(p.id))} dans le panier)`;
     else if (m) m.textContent = 'Code non ajouté : ' + code;
     return true;
-  });
+  }, { pick: salePick });
 }
 
 /* ===== Étiquettes code-barres (Code 128) =====
