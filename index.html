@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-28d';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-28e';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1654,65 +1654,93 @@ const salePick = codes => codes.find(c => unitByCode(normCode(c))) || codes.find
 /* --- Nouveau modèle : type, marque, modèle, mémoire. La couleur se note à l'arrivage, boîte par boîte. --- */
 const PC_BRANDS = ['HP', 'Dell', 'Lenovo', 'Acer', 'Asus', 'Apple', 'Toshiba'];
 const PC_RAM = ['4', '8', '16', '32'], PC_DISK = ['128 Go', '256 Go', '512 Go', '1 To'];
-function modelName(v) {
+const memLabel = m => Number(m) >= 1024 && Number(m) % 1024 === 0 ? (Number(m) / 1024) + ' To' : m + ' Go';
+function modelName(v, mem) {
   const head = [v.brand, v.model].filter(Boolean).join(' ');
   if (v.kind === 'Ordinateurs') return [head, v.ram ? v.ram + ' Go RAM' : '', v.disk].filter(Boolean).join(' · ');
-  return [head, v.mem ? v.mem + ' Go' : ''].filter(Boolean).join(' · ');
+  return [head, mem ? memLabel(mem) : ''].filter(Boolean).join(' · ');
 }
+// Nouveau modèle. Téléphones et tablettes : on coche TOUTES les mémoires reçues (ex. 256 Go, 512 Go, 1 To)
+// et on tape le prix de chacune : un modèle est créé par mémoire, en une seule fois.
+const PH_MEMS = ['32', '64', '128', '256', '512', '1024'];
 function modelForm(v, after) {
-  v = { kind: 'Smartphones', brand: '', model: '', mem: '', ram: '', disk: '', sell: '', buy: '', ...v };
+  v = { kind: 'Smartphones', brand: '', model: '', mems: [], px: {}, ram: '', disk: '', sell: '', buy: '', ...v };
   const pc = v.kind === 'Ordinateurs';
-  const chips = (key, list, suffix) => `<div class="chips" style="flex-wrap:wrap">${list.map(x => `<button type="button" data-mf="${key}" data-v="${esc(x)}" aria-pressed="${v[key] === x}">${esc(x)}${suffix || ''}</button>`).join('')}</div>`;
+  const chips = (key, list, lab) => `<div class="chips" style="flex-wrap:wrap">${list.map(x => `<button type="button" data-mf="${key}" data-v="${esc(x)}" aria-pressed="${key === 'mems' ? v.mems.includes(x) : v[key] === x}">${esc(lab ? lab(x) : x)}</button>`).join('')}</div>`;
   const big = 'style="font-size:18px;height:50px;font-weight:700"';
+  const memList = [...new Set([...PH_MEMS, ...v.mems])].sort((x, y) => Number(x) - Number(y));
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Nouveau modèle">
     <h2>Nouveau modèle</h2>
     <div class="modes" style="grid-template-columns:repeat(4,minmax(0,1fr))" role="radiogroup" aria-label="Type">
       ${DEV_TYPES.map(([c, ic, l]) => `<button type="button" data-kind="${esc(c)}" aria-pressed="${v.kind === c}" style="height:70px;font-size:12.5px"><span class="mi">${ic}</span>${l}</button>`).join('')}</div>
     <label>Marque<input id="mf-brand" value="${esc(v.brand)}" maxlength="40" placeholder="${pc ? 'ex. HP' : 'ex. Tecno'}" ${big}></label>${chips('brand', pc ? PC_BRANDS : PH_BRANDS)}
     <label>Modèle<input id="mf-model" value="${esc(v.model)}" maxlength="40" placeholder="${pc ? 'ex. 250 G9' : 'ex. Spark 20'}"></label>
-    ${pc ? `<div class="muted" style="font-size:13px;font-weight:600">Mémoire vive (RAM)</div>${chips('ram', PC_RAM, ' Go')}
+    ${pc ? `<div class="muted" style="font-size:13px;font-weight:600">Mémoire vive (RAM)</div>${chips('ram', PC_RAM, x => x + ' Go')}
       <div class="muted" style="font-size:13px;font-weight:600">Stockage</div>${chips('disk', PC_DISK)}`
-      : `<label>Mémoire (Go)<input id="mf-mem" value="${esc(v.mem)}" inputmode="numeric" maxlength="5" placeholder="${v.kind === 'Téléphones simples' ? 'facultatif' : 'ex. 128'}"></label>${chips('mem', PH_MEM, ' Go')}`}
-    <div class="metric" style="text-align:center"><span>Nom du modèle</span><b id="mf-name" style="font-size:18px">${esc(modelName(v) || '…')}</b></div>
-    <div class="row"><label>Prix de vente<input id="mf-sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.sell)}" ${big}></label>
-      <label>Prix d'achat (facultatif)<input id="mf-buy" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.buy)}" ${big}></label></div>
+      : `<div class="muted" style="font-size:13px;font-weight:600">Mémoire : cochez toutes celles que vous avez reçues${v.kind === 'Téléphones simples' ? ' (ou aucune)' : ''}</div>
+      ${chips('mems', memList, memLabel)}
+      <div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label style="flex:1 1 auto">Autre mémoire (Go)<input id="mf-mem" inputmode="numeric" maxlength="5"></label>
+        <button class="btn ghost small" type="button" id="mf-memadd" style="flex:0 0 auto;margin-bottom:2px">＋</button></div>`}
+    <div id="mf-prices" class="stack" style="gap:10px"></div>
     <p class="muted" style="margin:0;font-size:12.5px">La couleur et la garantie se notent à l'arrivage, boîte par boîte.</p>
-    <button class="btn huge" type="submit">✓ Enregistrer le modèle</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
-  const read = () => {
-    v.brand = $('#mf-brand').value.trim(); v.model = $('#mf-model').value.trim();
-    if ($('#mf-mem')) v.mem = $('#mf-mem').value.replace(/[^0-9]/g, '');
-    v.sell = $('#mf-sell').value; v.buy = $('#mf-buy').value;
-    $('#mf-name').textContent = modelName(v) || '…';
-    document.querySelectorAll('[data-mf]').forEach(b => b.setAttribute('aria-pressed', v[b.dataset.mf] === b.dataset.v));
+    <button class="btn huge" type="submit">✓ Enregistrer</button><button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
+  // Lignes de prix : une seule (ordinateur, ou aucune mémoire cochée), sinon une par mémoire cochée.
+  const rows = () => pc || !v.mems.length ? [''] : [...v.mems].sort((x, y) => Number(x) - Number(y));
+  const drawPrices = () => {
+    $('#mf-prices').innerHTML = rows().map(m => { const q = v.px[m] || {};
+      return `<section class="card stack" style="gap:8px;padding:12px"><b data-nm="${esc(m)}">${esc(modelName(v, m) || '…')}</b>
+        <div class="row"><label>Prix de vente<input data-px="${esc(m)}" data-f="sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(q.sell || '')}" ${big}></label>
+        <label>Prix d'achat (facultatif)<input data-px="${esc(m)}" data-f="buy" type="number" inputmode="numeric" min="0" step="1" value="${esc(q.buy || '')}" ${big}></label></div></section>`; }).join('');
+    document.querySelectorAll('[data-px]').forEach(i => i.oninput = () => { (v.px[i.dataset.px] = v.px[i.dataset.px] || {})[i.dataset.f] = i.value; });
   };
-  $('#sheet').addEventListener('input', read);
-  document.querySelectorAll('[data-mf]').forEach(b => b.onclick = () => { const k = b.dataset.mf;
-    if ($('#mf-' + k)) $('#mf-' + k).value = b.dataset.v; else v[k] = v[k] === b.dataset.v ? '' : b.dataset.v; read(); });
-  document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { read(); const was = v.kind === 'Ordinateurs';
+  const names = () => { document.querySelectorAll('[data-nm]').forEach(b => { b.textContent = modelName(v, b.dataset.nm) || '…'; }); };
+  const readTxt = () => { v.brand = $('#mf-brand').value.trim(); v.model = $('#mf-model').value.trim(); names();
+    document.querySelectorAll('[data-mf=brand],[data-mf=ram],[data-mf=disk]').forEach(b => b.setAttribute('aria-pressed', v[b.dataset.mf] === b.dataset.v)); };
+  $('#mf-brand').oninput = readTxt; $('#mf-model').oninput = readTxt;
+  drawPrices();
+  document.querySelectorAll('[data-mf]').forEach(b => b.onclick = () => { const k = b.dataset.mf, x = b.dataset.v;
+    if (k === 'mems') { v.mems = v.mems.includes(x) ? v.mems.filter(y => y !== x) : [...v.mems, x]; b.setAttribute('aria-pressed', v.mems.includes(x)); drawPrices(); return; }
+    if (k === 'brand') $('#mf-brand').value = x; else v[k] = v[k] === x ? '' : x;
+    readTxt(); });
+  const ma = $('#mf-memadd'); if (ma) ma.onclick = () => { const m = $('#mf-mem').value.replace(/[^0-9]/g, '');
+    if (!(Number(m) > 0)) return toast('Tapez la mémoire en Go (ex. 128).', true);
+    readTxt(); if (!v.mems.includes(m)) v.mems.push(m); modelForm(v, after); };
+  document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { readTxt(); const was = v.kind === 'Ordinateurs';
     v.kind = b.dataset.kind; if (was !== (v.kind === 'Ordinateurs')) v.brand = ''; modelForm(v, after); });
   $('#cancel').onclick = () => after ? after(null) : closeSheet();
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') $('#cancel').click(); };
   $('#sheet').onsubmit = async ev => {
-    ev.preventDefault(); read();
-    const name = modelName(v), sell = Math.round(Number(v.sell)), buy = v.buy === '' ? null : Math.round(Number(v.buy));
+    ev.preventDefault(); readTxt();
     if (!v.brand && !v.model) return toast('Tapez au moins la marque ou le modèle.', true);
-    if (v.sell === '' || !(sell > 0)) return toast('Tapez le prix de vente.', true);
-    if (S.products.some(p => nameKey(p.name) === nameKey(name))) return toast('Ce modèle existe déjà : ' + name, true);
+    const list = rows().map(m => { const q = v.px[m] || {};
+      return { m, name: modelName(v, m), sell: Math.round(Number(q.sell)), buy: q.buy === '' || q.buy == null ? null : Math.round(Number(q.buy)), raw: q.sell }; });
+    const noPrice = list.find(x => x.raw === '' || x.raw == null || !(x.sell > 0));
+    if (noPrice) return toast('Tapez le prix de vente : ' + noPrice.name, true);
+    const exist = list.filter(x => S.products.some(p => nameKey(p.name) === nameKey(x.name)));
+    if (exist.length) return toast('Existe déjà : ' + exist.map(x => x.name).join(', ') + '. Décochez cette mémoire.', true);
     const btn = ev.target.querySelector('[type=submit]');
-    if (buy != null && sell < buy && !btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = 'Confirmer (vente à perte)'; return toast(`Attention : vente ${money(sell)} < achat ${money(buy)}.`, true); }
+    const loss = list.find(x => x.buy != null && x.sell < x.buy);
+    if (loss && !btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = 'Confirmer (vente à perte)'; return toast(`Attention : ${loss.name} vendu ${money(loss.sell)} < achat ${money(loss.buy)}.`, true); }
     btn.disabled = true;
-    const { data, error } = await sb.rpc('create_device_model', { p_shop: S.shop.id, p_name: name, p_category: v.kind,
-      p_track_kind: devType(v.kind)[3], p_buy_price: buy, p_sell_price: sell, p_alert: 0 });
-    if (error) { btn.disabled = false; return toast(/create_device_model/.test(error.message || '') ? 'Installez d\'abord la mise à jour 016 dans Supabase.' : cleanErr(error), true); }
+    const made = [];
+    for (const x of list) {
+      btn.textContent = `Enregistrement ${made.length + 1} / ${list.length}…`;
+      const { data, error } = await sb.rpc('create_device_model', { p_shop: S.shop.id, p_name: x.name, p_category: v.kind,
+        p_track_kind: devType(v.kind)[3], p_buy_price: x.buy, p_sell_price: x.sell, p_alert: 0 });
+      if (error) { toast(/create_device_model/.test(error.message || '') ? 'Installez d\'abord la mise à jour 016 dans Supabase.' : x.name + ' : ' + cleanErr(error), true); break; }
+      made.push({ ...x, id: data });
+    }
     await loadProducts(); S.summary = null;
-    toast('Modèle enregistré : ' + name);
-    if (after) return after(data);
+    if (!made.length) { btn.disabled = false; btn.textContent = '✓ Enregistrer'; return; }
+    toast(made.length > 1 ? `${made.length} modèles enregistrés` : 'Modèle enregistré : ' + made[0].name);
+    if (after) return after(made[0].id);
     // Seul : on propose tout de suite l'arrivage des boîtes.
-    $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Modèle enregistré">
-      <h2>✅ ${esc(name)}</h2><div class="metric" style="text-align:center"><b>${esc(money(sell))}</b><span>0 en stock pour l'instant</span></div>
+    $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Modèles enregistrés">
+      <h2>✅ ${made.length > 1 ? made.length + ' modèles enregistrés' : 'Modèle enregistré'}</h2>
+      ${made.map(x => `<div class="metric" style="text-align:center"><b style="font-size:16px">${esc(x.name)}</b><span>${esc(money(x.sell))}</span></div>`).join('')}
       <button class="btn huge" id="mf-arr">📥 Scanner les boîtes reçues</button>
       <button class="btn ghost" id="mf-new">Un autre modèle</button><button class="btn ghost" id="mf-done">Terminé</button></div></div>`;
-    $('#mf-arr').onclick = () => arrival({ pid: data });
+    $('#mf-arr').onclick = () => arrival({ pid: made[0].id });
     $('#mf-new').onclick = () => modelForm({ kind: v.kind, brand: v.brand });
     $('#mf-done').onclick = () => { closeSheet(); draw(); };
   };
@@ -1757,6 +1785,22 @@ async function arrivalCode(raw) {
   if (data.suggest && !S.arr.existing) S.arr.pid = data.suggest.product_id;
   arrivalForm(c);
 }
+// Familles de modèles : « iPhone 15 Pro Max · 256 Go » et « … · 512 Go » = famille « iPhone 15 Pro Max ».
+const famName = p => String(p.name).split(' · ')[0];
+const memVal = p => { const t = String(p.name).split(' · ').slice(1).join(' '), m = t.match(/([0-9]+)\s*(To|Go)/i);
+  return m ? Number(m[1]) * (/to/i.test(m[2]) ? 1024 : 1) : 0; };
+const famOf = (models, f) => models.filter(m => famName(m) === f).sort((a, b) => memVal(a) - memVal(b) || a.name.localeCompare(b.name, 'fr'));
+function famHtml(models, pid) {
+  const fams = [...new Set(models.map(famName))], cur = pid ? famName(S.products.find(p => p.id === pid) || {}) : (S.arr && S.arr.fam) || '';
+  if (!fams.length) return '<p class="muted" style="margin:0">Aucun modèle encore : créez-le.</p>';
+  const list = cur ? famOf(models, cur) : [];
+  return `<div class="plist" role="radiogroup" aria-label="Modèle" style="max-height:236px;overflow:auto">${fams.map(f => { const l = famOf(models, f), on = f === cur, st = l.reduce((a, m) => a + Number(m.stock_qty), 0);
+      return `<button type="button" class="prow" data-fam="${esc(f)}" aria-pressed="${on}" style="${on ? 'border:3px solid var(--accent);background:var(--accent-soft)' : ''}">
+        ${prodIcon(l[0], 40)}<span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(f)}</span><br><span class="sub">${l.length > 1 ? l.length + ' mémoires · ' : esc(money(l[0].sell_price)) + ' · '}${st} en stock</span></span>${on ? '<span style="font-size:20px">✓</span>' : ''}</button>`; }).join('')}</div>
+    ${list.length > 1 ? `<div class="muted" style="font-size:13px;font-weight:600">Mémoire</div>
+      <div class="modes" style="grid-template-columns:repeat(${Math.min(3, list.length)},minmax(0,1fr))">${list.map(m => `<button type="button" data-m="${esc(m.id)}" aria-pressed="${m.id === pid}" style="height:64px">
+        <span style="font-size:16px">${esc(String(m.name).split(' · ').slice(1).join(' · ') || m.name)}</span><span class="muted" style="font-size:11.5px;font-weight:500">${esc(fmtNum.format(m.sell_price))}</span></button>`).join('')}</div>` : ''}`;
+}
 function arrivalForm(code, extra = {}) {
   const A = S.arr, imei = /^[0-9]{15}$/.test(code);
   const models = S.products.filter(isTracked).sort((a, b) => (b.track_kind === (imei ? 'imei' : 'serial')) - (a.track_kind === (imei ? 'imei' : 'serial')) || a.name.localeCompare(b.name, 'fr'));
@@ -1769,9 +1813,7 @@ function arrivalForm(code, extra = {}) {
     <div class="metric" style="text-align:center"><span>${imei ? 'IMEI ✓' : 'N° de série'}</span><b style="font-size:19px;letter-spacing:.5px;word-break:break-all">${esc(code)}</b></div>
     <div class="muted" style="font-size:13px;font-weight:600">Modèle</div>
     ${A.existing && p ? `<div class="prow" style="cursor:default">${prodIcon(p, 40)}<span class="nm">${esc(p.name)}</span></div>` : `
-    <div class="plist" role="radiogroup" aria-label="Modèle" style="max-height:236px;overflow:auto">${models.map(m => `<button type="button" class="prow" data-m="${esc(m.id)}" aria-pressed="${m.id === A.pid}" style="${m.id === A.pid ? 'border:3px solid var(--accent);background:var(--accent-soft)' : ''}">
-        ${prodIcon(m, 40)}<span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(m.name)}</span><br><span class="sub">${esc(money(m.sell_price))} · ${esc(qty(m.stock_qty))} en stock</span></span>${m.id === A.pid ? '<span style="font-size:20px">✓</span>' : ''}</button>`).join('')
-      || '<p class="muted" style="margin:0">Aucun modèle encore : créez-le.</p>'}</div>
+    ${famHtml(models, A.pid)}
     <button class="btn ghost" type="button" id="ar-newm">＋ Nouveau modèle</button>`}
     <label>Couleur<input id="ar-color" value="${esc(A.color)}" maxlength="30" placeholder="ex. Noir"></label>
     <div class="chips" style="flex-wrap:wrap">${PH_COLORS.map(c => `<button type="button" data-col="${esc(c)}" aria-pressed="${A.color === c}">${esc(c)}</button>`).join('')}</div>
@@ -1788,6 +1830,8 @@ function arrivalForm(code, extra = {}) {
   document.querySelectorAll('[data-col]').forEach(b => b.onclick = () => { $('#ar-color').value = b.dataset.col; $('#ar-color').oninput(); });
   document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { A.warranty = Number(b.dataset.w); document.querySelectorAll('[data-w]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
   document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { A.pid = b.dataset.m; arrivalForm(code, keep()); });
+  document.querySelectorAll('[data-fam]').forEach(b => b.onclick = () => { const l = famOf(models, b.dataset.fam);
+    A.pid = l.length === 1 ? l[0].id : (l.some(m => m.id === A.pid) ? A.pid : null); A.fam = b.dataset.fam; arrivalForm(code, keep()); });
   const nm = $('#ar-newm'); if (nm) nm.onclick = () => { const k = keep();
     modelForm({ kind: imei ? 'Smartphones' : 'Ordinateurs' }, pid => { if (pid) A.pid = pid; arrivalForm(code, k); }); };
   const s2 = $('#ar-s2scan'); if (s2) s2.onclick = () => openScanner('Scanner le 2e IMEI', c2 => { const v = normCode(c2);
@@ -1796,7 +1840,7 @@ function arrivalForm(code, extra = {}) {
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') arrivalStart(); };
   $('#sheet').onsubmit = async ev => {
     ev.preventDefault();
-    if (!A.pid) return toast('Choisissez le modèle (ou créez-le).', true);
+    if (!A.pid) return toast(A.fam ? 'Touchez la mémoire.' : 'Choisissez le modèle (ou créez-le).', true);
     const s2 = $('#ar-s2') ? normCode($('#ar-s2').value) : '';
     if (s2 && /^[0-9]{15}$/.test(s2) && !imeiOk(s2)) return toast('2e IMEI mal lu : vérifiez-le.', true);
     const buyRaw = $('#ar-buy') ? $('#ar-buy').value : '';
