@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-28c';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-28d';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -4078,7 +4078,7 @@ function unitLabelsPdf(units) {
     if (k === 0) pdf.page();
     const x = MX + (k % COLS) * CW, y = MY + Math.floor(k / COLS) * RH, p = S.products.find(q => q.id === u.product_id) || {};
     pdf.line(x + 6, x + CW - 6, y + RH - 1, [0.85, 0.87, 0.85], 0.5);
-    pdf.text(x + CW / 2, y + 18, pdfWrap(p.name || '', true, 11, CW - 20)[0] || '', { size: 11, bold: true, align: 'center' });
+    pdf.text(x + CW / 2, y + 18, pdfWrap(u.name || p.name || '', true, 11, CW - 20)[0] || '', { size: 11, bold: true, align: 'center' });
     const sub = [u.color, Number(u.warranty_months) ? 'garantie ' + u.warranty_months + ' mois' : ''].filter(Boolean).join(' · ');
     if (sub) pdf.text(x + CW / 2, y + 32, sub, { size: 9, align: 'center', color: [0.3, 0.33, 0.31] });
     const mods = code128(u.serial);
@@ -4087,7 +4087,7 @@ function unitLabelsPdf(units) {
       let bx = x + (CW - bw) / 2;
       mods.forEach((m, i) => { if (i % 2 === 0) pdf.rect(bx, y + 40, m * mw, 52, [0, 0, 0]); bx += m * mw; });
     }
-    pdf.text(x + CW / 2, y + 108, (p.track_kind === 'serial' ? 'S/N ' : 'IMEI ') + u.serial, { size: 11, bold: true, align: 'center' });
+    pdf.text(x + CW / 2, y + 108, (imeiOk(u.serial) ? 'IMEI ' : 'S/N ') + u.serial, { size: 11, bold: true, align: 'center' });
   });
   return pdf.build('Étiquettes appareils ' + S.shop.name);
 }
@@ -4097,6 +4097,42 @@ function downloadPdf(bytes, name) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 15000);
 }
+// Étiquettes à la main : on tape les IMEI (ou numéros de série) soi-même, AVANT l'arrivage.
+// On imprime, on colle sur les boîtes, puis on scanne ces grosses étiquettes à l'arrivage et à la vente.
+function freeLabelsSheet(list = [], name = '') {
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Créer des étiquettes IMEI">
+    <h2>✍️ Créer des étiquettes IMEI</h2>
+    <p class="muted" style="margin:0;font-size:13px">Tapez l'IMEI de chaque téléphone (touchez *#06# sur le téléphone pour le voir), puis « Ajouter ». Ensuite : imprimez, collez sur les boîtes, et scannez-les à l'arrivage.</p>
+    <div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label style="flex:1 1 auto">IMEI ou n° de série<input id="fl-code" autocomplete="off" autocapitalize="characters" maxlength="44" style="font-size:18px;height:50px;letter-spacing:.5px"></label>
+      <button class="btn" type="submit" style="flex:0 0 auto;margin-bottom:2px">Ajouter</button></div>
+    <label>Nom sur l'étiquette (facultatif)<input id="fl-name" maxlength="60" value="${esc(name)}" placeholder="ex. Samsung A14 128 Go"></label>
+    <div class="plist">${list.map((c, i) => `<div class="prow" style="cursor:default"><span style="font-size:20px">🏷️</span><span style="flex:1 1 auto;min-width:0" class="nm">${esc(c)}</span>
+      <button class="btn ghost small" type="button" data-flx="${i}" aria-label="Retirer">✕</button></div>`).join('') || '<p class="muted" style="margin:0">Aucun numéro pour l\'instant.</p>'}</div>
+    <button class="btn huge" type="button" id="fl-pdf" ${list.length ? '' : 'disabled'}>🖨️ Créer le PDF (${list.length})</button>
+    <button class="btn ghost" type="button" id="cancel">Fermer</button></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  const nm = () => $('#fl-name').value.trim();
+  document.querySelectorAll('[data-flx]').forEach(b => b.onclick = () => { list.splice(Number(b.dataset.flx), 1); freeLabelsSheet(list, nm()); });
+  $('#sheet').onsubmit = ev => {
+    ev.preventDefault();
+    const c = normCode($('#fl-code').value);
+    if (!c) return;
+    if (/^[0-9]{15}$/.test(c) && !imeiOk(c)) return toast('IMEI mal tapé : ' + c + '. Vérifiez les 15 chiffres.', true);
+    if (/^[0-9]+$/.test(c) && c.length !== 15) return toast('Un IMEI a 15 chiffres (ici ' + c.length + ').', true);
+    if (!/^[0-9A-Z][0-9A-Z/.-]{3,39}$/.test(c)) return toast('Numéro invalide : ' + c, true);
+    if (list.includes(c)) return toast('Déjà dans la liste.', true);
+    list.push(c); freeLabelsSheet(list, nm());
+    setTimeout(() => $('#fl-code') && $('#fl-code').focus(), 0);
+  };
+  $('#fl-pdf').onclick = () => {
+    if (!list.length) return;
+    downloadPdf(unitLabelsPdf(list.map(c => ({ serial: c, name: nm() }))), 'Etiquettes-IMEI-' + new Date().toISOString().slice(0, 10) + '.pdf');
+    toast('Étiquettes créées : ouvrez le PDF pour l\'imprimer.');
+  };
+  setTimeout(() => $('#fl-code') && $('#fl-code').focus(), 0);
+}
+
 // Après un arrivage : proposer les étiquettes des boîtes reçues.
 function labelsOffer(serials) {
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Étiquettes">
@@ -4137,7 +4173,8 @@ function openLabels() {
   const missing = S.products.length - prods.length;
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Étiquettes">
     <h2>Imprimer des étiquettes</h2>
-    ${S.products.some(isTracked) ? `<button class="btn" type="button" id="lb-units" style="height:auto;padding:12px">📱 Étiquettes des appareils (IMEI)<br><small style="font:400 12.5px var(--f-body);opacity:.85">une grande étiquette par boîte, facile à scanner</small></button>` : ''}
+    ${canTrack() ? `<button class="btn" type="button" id="lb-free" style="height:auto;padding:12px">✍️ Créer des étiquettes IMEI<br><small style="font:400 12.5px var(--f-body);opacity:.85">je tape les IMEI, j'imprime, je colle sur les boîtes</small></button>
+      ${S.products.some(isTracked) ? `<button class="btn ghost" type="button" id="lb-units" style="height:auto;padding:12px">📱 Étiquettes des appareils en stock<br><small style="font:400 12.5px var(--f-body);opacity:.85">appareils déjà enregistrés</small></button>` : ''}` : ''}
     <p class="muted" style="margin:0;font-size:13px">Choisissez le nombre d'étiquettes par produit (0 = aucune). Planche A4 de 24 étiquettes, à imprimer puis découper. Collez-les sur l'article, son emballage ou l'étagère (produits en vrac).</p>
     ${missing ? `<div class="banner">${missing} produit(s) n'ont pas encore de code : ils en recevront un après la mise à jour de la base.</div>` : ''}
     <div class="row"><button class="btn ghost small" type="button" id="lb-all">1 pour tous</button><button class="btn ghost small" type="button" id="lb-none">Aucun</button></div>
@@ -4149,6 +4186,7 @@ function openLabels() {
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   const lu = $('#lb-units'); if (lu) lu.onclick = () => unitLabelsSheet();
+  const lf = $('#lb-free'); if (lf) lf.onclick = () => freeLabelsSheet();
   $('#lb-all').onclick = () => document.querySelectorAll('[data-lb]').forEach(i => { i.value = 1; });
   $('#lb-none').onclick = () => document.querySelectorAll('[data-lb]').forEach(i => { i.value = 0; });
   $('#sheet').onsubmit = ev => {
