@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-28i';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-28k';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1281,14 +1281,28 @@ function drawProducts() {
       const inCart = list.reduce((a, p) => a + (S.cart.get(p.id) ? 1 : 0), 0);
       return `<button class="htile" data-folder="${esc(c)}" style="min-height:118px"><span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${folderIc(c)}</span>
         ${inCart ? `<span class="hbadge">${inCart} au panier</span>` : ''}<span class="hl">${esc(c)}</span><span class="muted" style="font-size:12.5px;font-weight:400">${list.length} produit${list.length > 1 ? 's' : ''}</span></button>`; }).join('');
-    document.querySelectorAll('[data-folder]').forEach(b => b.onclick = () => { S.cat = b.dataset.folder; drawProducts(); window.scrollTo(0, 0); });
+    document.querySelectorAll('[data-folder]').forEach(b => b.onclick = () => { S.cat = b.dataset.folder; S.brand = ''; drawProducts(); window.scrollTo(0, 0); });
     return;
   }
   $('#plist').className = 'tiles';
-  if (head) head.innerHTML = folders && S.cat && !t ? `<div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="folder-back" style="flex:0 0 auto">‹ Rayons</button>
-    <h2 style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${folderIc(S.cat)} ${esc(S.cat)}</h2></div>` : '';
-  const fb = $('#folder-back'); if (fb) fb.onclick = () => { S.cat = ''; drawProducts(); };
-  const all = S.products.filter(p => (t || !S.cat || p.category === S.cat) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t));
+  // Rayon de téléphones ou d'ordinateurs : d'abord les MARQUES (Samsung, Apple, Tecno…), puis leurs modèles.
+  const inCatAll = folders && S.cat && !t ? S.products.filter(p => p.category === S.cat) : [];
+  const brands = devType(S.cat) ? [...new Set(inCatAll.map(brandOf))].sort((a, b) => (a === 'Autres') - (b === 'Autres') || a.localeCompare(b, 'fr')) : [];
+  const byBrand = brands.length > 1 && inCatAll.length > 4;
+  if (!byBrand || !brands.includes(S.brand)) S.brand = '';
+  if (head) head.innerHTML = folders && S.cat && !t ? `<div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="folder-back" style="flex:0 0 auto">‹ ${S.brand ? esc(S.cat) : 'Rayons'}</button>
+    <h2 style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${S.brand ? esc(S.brand) : folderIc(S.cat) + ' ' + esc(S.cat)}</h2></div>` : '';
+  const fb = $('#folder-back'); if (fb) fb.onclick = () => { if (S.brand) S.brand = ''; else S.cat = ''; drawProducts(); window.scrollTo(0, 0); };
+  if (byBrand && !S.brand) {
+    $('#plist').className = 'htiles';
+    $('#plist').innerHTML = brands.map(br => { const l = inCatAll.filter(p => brandOf(p) === br), fams = new Set(l.map(famName)).size;
+      const st = l.reduce((a, p) => a + Math.max(0, Number(p.stock_qty)), 0), inCart = l.reduce((a, p) => a + (S.cart.get(p.id) ? 1 : 0), 0);
+      return `<button class="htile" data-brand="${esc(br)}" style="min-height:110px"><span class="hic" style="background:var(--accent-soft);font:800 20px var(--f-display);color:var(--accent)" aria-hidden="true">${esc(br === 'Autres' ? '📱' : br.slice(0, 2).toUpperCase())}</span>
+        ${inCart ? `<span class="hbadge">${inCart} au panier</span>` : ''}<span class="hl">${esc(br)}</span><span class="muted" style="font-size:12.5px;font-weight:400">${fams} modèle${fams > 1 ? 's' : ''} · ${st} en stock</span></button>`; }).join('');
+    document.querySelectorAll('[data-brand]').forEach(b => b.onclick = () => { S.brand = b.dataset.brand; drawProducts(); window.scrollTo(0, 0); });
+    return;
+  }
+  const all = S.products.filter(p => (t || !S.cat || p.category === S.cat) && (!S.brand || brandOf(p) === S.brand) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t));
   // Produits à variantes (« Coque · iPhone 15 », « Coque · A15 ») : une seule tuile « Coque » ; on choisit
   // ensuite la variante en gros boutons. Pendant une recherche, chaque variante reste visible.
   const fams = new Map(), list = [];
@@ -1300,7 +1314,7 @@ function drawProducts() {
     const [bg, fg] = tileColor(p.category || p.name), inCart = S.cart.get(p.id), out = Number(p.stock_qty) <= 0;
     return `<button class="tile${inCart ? ' in' : ''}" data-add="${esc(p.id)}" ${out && !S.offline ? 'disabled' : ''} aria-label="${esc(p.name)}, ${esc(money(p.sell_price))}${inCart ? ', ' + esc(qty(inCart)) + ' dans le panier' : ''}">
       ${artFor(p.name, p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(p.name, p.category)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>`}
-      <span class="tn">${esc(p.name)}</span>
+      <span class="tn">${esc(S.brand ? noBrand(p.name) : p.name)}</span>
       ${out ? '<span class="ts">Épuisé</span>' : `<span class="tp">${esc(fmtNum.format(p.sell_price))}</span>`}
       ${inCart ? `<span class="tq" aria-hidden="true">${esc(qty(inCart))}</span>` : ''}</button>`;
   }).join('') : '<p class="empty" style="grid-column:1/-1">Aucun produit trouvé.</p>';
@@ -1308,17 +1322,27 @@ function drawProducts() {
   document.querySelectorAll('[data-famp]').forEach(b => b.onclick = () => familySheet(b.dataset.famp));
 }
 
+// Marque d'un téléphone ou d'un ordinateur : le premier mot du nom (iPhone, iPad, MacBook -> Apple).
+function brandOf(p) {
+  const w = String(p.name || '').trim().split(/\s+/)[0] || '';
+  if (/^(iphone|ipad|macbook|apple)$/i.test(w)) return 'Apple';
+  if (!w || /^(smartphone|t[ée]l[ée]phone|tablette|ordinateur|portable)$/i.test(w)) return 'Autres';
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+// Dans une marque, on n'écrit pas la marque sur chaque tuile (« Samsung A15 » -> « A15 » ; iPhone gardé).
+const noBrand = n => { const w = String(n).split(/\s+/); return /^(samsung|tecno|itel|infinix|xiaomi|nokia|huawei|oppo|hp|dell|lenovo|acer|asus|toshiba|redmi|realme|vivo|honor|motorola|google|lg|sony)$/i.test(w[0]) && w.length > 1 ? w.slice(1).join(' ') : n; };
+
 // Famille d'un produit : le nom avant « · », dans le même rayon. Sans « · », pas de famille.
 const famKey = p => String(p.name).includes(' · ') ? (p.category || '') + '|' + famName(p) : '';
 const famList = p => { const k = famKey(p); return k ? S.products.filter(q => famKey(q) === k).sort((a, b) => memVal(a) - memVal(b) || a.name.localeCompare(b.name, 'fr')) : [p]; };
-const varName = p => String(p.name).split(' · ').slice(1).join(' · ') || p.name;
+const varName = p => String(p.name).split(' · ').slice(1).join(' · ') || (isTracked(p) ? 'Sans mémoire' : p.name);
 function famTile(p) {
   const l = famList(p), f = famName(p), [bg, fg] = tileColor(p.category || f), n = l.reduce((a, q) => a + (S.cart.get(q.id) || 0), 0);
   const min = Math.min(...l.map(q => Number(q.sell_price))), max = Math.max(...l.map(q => Number(q.sell_price)));
   const out = l.every(q => Number(q.stock_qty) <= 0);
   return `<button class="tile${n ? ' in' : ''}" data-famp="${esc(p.id)}" ${out && !S.offline ? 'disabled' : ''} aria-label="${esc(f)}, ${l.length} choix">
     ${artFor(f, p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(f, p.category)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(f))}</span>`}
-    <span class="tn">${esc(f)}</span><span class="muted" style="font-size:12px">${l.length} choix</span>
+    <span class="tn">${esc(S.brand ? noBrand(f) : f)}</span><span class="muted" style="font-size:12px">${l.length} choix</span>
     ${out ? '<span class="ts">Épuisé</span>' : `<span class="tp">${min === max ? '' : 'dès '}${esc(fmtNum.format(min))}</span>`}
     ${n ? `<span class="tq" aria-hidden="true">${esc(qty(n))}</span>` : ''}</button>`;
 }
@@ -1962,7 +1986,41 @@ function famHtml(models, pid) {
         ${prodIcon(l[0], 40)}<span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(f)}</span><br><span class="sub">${l.length > 1 ? l.length + ' mémoires · ' : esc(money(l[0].sell_price)) + ' · '}${st} en stock</span></span>${on ? '<span style="font-size:20px">✓</span>' : ''}</button>`; }).join('')}</div>
     ${list.length > 1 ? `<div class="muted" style="font-size:13px;font-weight:600">Mémoire</div>
       <div class="modes" style="grid-template-columns:repeat(${Math.min(3, list.length)},minmax(0,1fr))">${list.map(m => `<button type="button" data-m="${esc(m.id)}" aria-pressed="${m.id === pid}" style="height:64px">
-        <span style="font-size:16px">${esc(String(m.name).split(' · ').slice(1).join(' · ') || m.name)}</span><span class="muted" style="font-size:11.5px;font-weight:500">${esc(fmtNum.format(m.sell_price))}</span></button>`).join('')}</div>` : ''}`;
+        <span style="font-size:16px">${esc(varName(m))}</span><span class="muted" style="font-size:11.5px;font-weight:500">${esc(fmtNum.format(m.sell_price))}</span></button>`).join('')}</div>` : ''}
+    ${list.length && list[0].category !== 'Ordinateurs' ? `<button class="btn ghost small" type="button" id="ar-addmem" data-fp="${esc(list[0].id)}">＋ Autre mémoire pour ${esc(cur)}</button>` : ''}`;
+}
+// Ajouter une mémoire à un modèle déjà créé (ex. « iPhone 18 Pro Max » reçu aussi en 512 Go).
+function addMemSheet(p, after) {
+  const f = famName(p), have = new Set(famOf(S.products.filter(isTracked), f).map(m => memVal(m)));
+  let mem = '';
+  const big = 'style="font-size:18px;height:50px;font-weight:700"';
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Autre mémoire">
+    <h2>＋ Autre mémoire</h2><div class="muted">${esc(f)}</div>
+    <div class="chips" style="flex-wrap:wrap">${PH_MEMS.filter(m => !have.has(Number(m))).map(m => `<button type="button" data-am="${m}">${esc(memLabel(m))}</button>`).join('')}</div>
+    <label>ou tapez la mémoire (Go)<input id="am-mem" inputmode="numeric" maxlength="5"></label>
+    <div class="row"><label>Prix de vente<input id="am-sell" type="number" inputmode="numeric" min="0" step="1" ${big}></label>
+      <label>Prix d'achat (facultatif)<input id="am-buy" type="number" inputmode="numeric" min="0" step="1" ${big}></label></div>
+    <button class="btn huge" type="submit">✓ Ajouter</button><button class="btn ghost" type="button" id="cancel">Retour</button></form></div>`;
+  document.querySelectorAll('[data-am]').forEach(b => b.onclick = () => { mem = b.dataset.am; $('#am-mem').value = '';
+    document.querySelectorAll('[data-am]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  $('#am-mem').oninput = () => { mem = $('#am-mem').value.replace(/[^0-9]/g, ''); document.querySelectorAll('[data-am]').forEach(x => x.setAttribute('aria-pressed', false)); };
+  $('#cancel').onclick = () => after(null);
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') after(null); };
+  $('#sheet').onsubmit = async ev => {
+    ev.preventDefault();
+    const sell = Math.round(Number($('#am-sell').value)), bRaw = $('#am-buy').value;
+    if (!(Number(mem) > 0)) return toast('Touchez ou tapez la mémoire.', true);
+    if (have.has(Number(mem))) return toast('Cette mémoire existe déjà.', true);
+    if ($('#am-sell').value === '' || !(sell > 0)) return toast('Tapez le prix de vente.', true);
+    const name = f + ' · ' + memLabel(mem);
+    if (S.products.some(q => nameKey(q.name) === nameKey(name))) return toast('Existe déjà : ' + name, true);
+    const btn = ev.target.querySelector('[type=submit]'); btn.disabled = true;
+    const { data, error } = await sb.rpc('create_device_model', { p_shop: S.shop.id, p_name: name, p_category: p.category,
+      p_track_kind: p.track_kind, p_buy_price: bRaw === '' ? null : Math.round(Number(bRaw)), p_sell_price: sell, p_alert: 0 });
+    if (error) { btn.disabled = false; return toast(cleanErr(error), true); }
+    await loadProducts(); toast('Ajouté : ' + name);
+    after(data);
+  };
 }
 function arrivalForm(code, extra = {}) {
   const A = S.arr, cur0 = A.pid && S.products.find(x => x.id === A.pid);
@@ -1995,6 +2053,8 @@ function arrivalForm(code, extra = {}) {
   document.querySelectorAll('[data-col]').forEach(b => b.onclick = () => { $('#ar-color').value = b.dataset.col; $('#ar-color').oninput(); });
   document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { A.warranty = Number(b.dataset.w); document.querySelectorAll('[data-w]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
   document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { A.pid = b.dataset.m; arrivalForm(code, keep()); });
+  const am = $('#ar-addmem'); if (am) am.onclick = () => { const k = keep();
+    addMemSheet(S.products.find(x => x.id === am.dataset.fp), pid => { if (pid) A.pid = pid; arrivalForm(code, k); }); };
   document.querySelectorAll('[data-fam]').forEach(b => b.onclick = () => { const l = famOf(models, b.dataset.fam);
     A.pid = l.length === 1 ? l[0].id : (l.some(m => m.id === A.pid) ? A.pid : null); A.fam = b.dataset.fam; arrivalForm(code, keep()); });
   const nm = $('#ar-newm'); if (nm) nm.onclick = () => { const k = keep();
