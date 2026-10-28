@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-28a';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-28b';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -3716,7 +3716,7 @@ async function openScanner(title, onCode, opts = {}) {
       <div style="position:absolute;left:8%;right:8%;top:38%;height:24%;border:2px solid #6fcf97;border-radius:8px;box-shadow:0 0 0 999px rgba(0,0,0,.25)"></div>
     </div>
     <p class="muted" id="scan-msg" style="margin:0;text-align:center">${esc(opts.hint || 'Placez le code-barres dans le cadre.')}</p>
-    <p class="muted" style="margin:0;text-align:center;font-size:12.5px">Code bien droit dans le cadre vert. Image floue ? Reculez un peu et touchez « Zoom ».</p>
+    <p class="muted" style="margin:0;text-align:center;font-size:12.5px">Code bien droit dans le cadre vert. Image floue ? Touchez l'image, ou reculez un peu et touchez « Zoom ».</p>
     <div class="row"><button class="btn ghost" type="button" id="scan-zoom" hidden>🔍 Zoom</button><button class="btn ghost" type="button" id="scan-light" hidden>🔦 Lumière</button></div>
     <button class="btn ghost" type="button" id="scan-x">Terminer</button></div></div>`;
   document.body.appendChild(host);
@@ -3752,6 +3752,13 @@ async function openScanner(title, onCode, opts = {}) {
           zb.textContent = '🔍 Zoom ×' + steps[(zi + 1) % steps.length]; };
         zb.hidden = false; zb.onclick = () => { zi = (zi + 1) % steps.length; setZ(); }; setZ();
       }
+      // Toucher l'image : le téléphone refait la mise au point à cet endroit (si la caméra le permet).
+      v.onclick = async ev => {
+        const r = v.getBoundingClientRect(), pt = { x: (ev.clientX - r.left) / r.width, y: (ev.clientY - r.top) / r.height };
+        const m = $('#scan-msg'); if (m) m.textContent = 'Mise au point…';
+        try { await tr.applyConstraints({ advanced: [{ pointsOfInterest: [pt], focusMode: 'single-shot' }] }); } catch (e6) {}
+        setTimeout(async () => { try { if ((cap.focusMode || []).includes('continuous')) await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e7) {} }, 1500);
+      };
       if (cap.torch) { const b = $('#scan-light'); b.hidden = false; let on = false;
         b.onclick = async () => { on = !on; try { await tr.applyConstraints({ advanced: [{ torch: on }] }); b.textContent = on ? '🔦 Éteindre' : '🔦 Lumière'; } catch (e2) {} }; }
     } catch (e1) {}
@@ -3959,11 +3966,26 @@ function softRunsG(gray, w) {
   if (runs.length % 2 === 0) runs.pop();                       // finir sur une barre
   return { runs, lead: edges[k].p };
 }
+// Image floue : on « rend net » la ligne (on renforce l'écart avec les pixels voisins), puis on relit.
+function softSharp(gray, w, sig, amt) {
+  const R = Math.ceil(sig * 3), ker = []; let ks = 0;
+  for (let k = -R; k <= R; k++) { const v = Math.exp(-k * k / (2 * sig * sig)); ker.push(v); ks += v; }
+  const out = new Float32Array(w);
+  for (let x = 0; x < w; x++) { let s = 0;
+    for (let k = -R; k <= R; k++) s += ker[k + R] * gray[Math.min(w - 1, Math.max(0, x + k))];
+    out[x] = gray[x] + amt * (gray[x] - s / ks); }
+  return out;
+}
+// Une ligne : telle quelle, puis rendue nette (force différente à chaque image de la caméra, pour rester
+// rapide), à l'endroit des couleurs puis inversée (code clair sur fond sombre).
+const SHARP = [[1.5, 1.5], [2.5, 2.5]];
 function softRow(gray, w, out) {
-  for (const f of [softRunsT, softRunsG]) { const R = f(gray, w); if (R && R.runs.length >= 19) softTry(R, out); }
-  if (!out.size) {                                              // code clair sur fond sombre (écran en mode sombre)
-    const inv = gray.map(v => 255 - v);
-    for (const f of [softRunsT, softRunsG]) { const R = f(inv, w); if (R && R.runs.length >= 19) softTry(R, out); }
+  const sh = SHARP[(SOFT.pass || 0) % SHARP.length];
+  for (const base of [gray, softSharp(gray, w, sh[0], sh[1])]) {
+    for (const g of [base, base.map(v => 255 - v)]) {
+      for (const f of [softRunsT, softRunsG]) { const R = f(g, w); if (R && R.runs.length >= 19) softTry(R, out); }
+      if (out.size) return;
+    }
   }
 }
 function softTry(R, out) {
@@ -3977,6 +3999,7 @@ function softTry(R, out) {
 }
 // Lit la bande du milieu de l'image (là où est le cadre vert), plusieurs lignes, à l'endroit et à l'envers.
 function softScan(src) {
+  SOFT.pass = (SOFT.pass || 0) + 1;
   const vw = src.videoWidth || src.naturalWidth || src.width, vh = src.videoHeight || src.naturalHeight || src.height;
   if (!vw || !vh) return [];
   const W = Math.min(1920, vw), H = 48;
