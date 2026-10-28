@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-28b';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-28c';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1723,7 +1723,7 @@ function modelForm(v, after) {
 function arrival(opts = {}) {
   if (S.offline) return toast('L\'arrivage se fait avec du réseau.', true);
   S.arr = { pid: opts.pid || (S.arr && S.arr.pid) || null, color: (S.arr && S.arr.color) || '',
-    warranty: S.arr && S.arr.warranty != null ? S.arr.warranty : (S.shop.warranty || 0), existing: !!opts.existing, n: 0 };
+    warranty: S.arr && S.arr.warranty != null ? S.arr.warranty : (S.shop.warranty || 0), existing: !!opts.existing, n: 0, saved: [] };
   arrivalStart();
 }
 function arrivalStart(msg) {
@@ -1739,7 +1739,8 @@ function arrivalStart(msg) {
     <div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label style="flex:1 1 auto">ou tapez le numéro<input id="ar-code" autocomplete="off" maxlength="44" inputmode="text" style="font-size:18px;height:50px;letter-spacing:.5px"></label>
       <button class="btn" type="submit" style="flex:0 0 auto;margin-bottom:2px">OK</button></div>
     <button class="btn ghost" type="button" id="ar-done">Terminé</button></form></div>`;
-  const done = async () => { closeSheet(); await loadProducts(); S.summary = null; draw(); };
+  const done = async () => { closeSheet(); await loadProducts(); S.summary = null; draw();
+    if (A.saved.length) labelsOffer(A.saved); };
   $('#ar-done').onclick = done;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') done(); };
   $('#sheet').onsubmit = ev => { ev.preventDefault(); const c = $('#ar-code').value; if (c.trim()) arrivalCode(c); };
@@ -1804,13 +1805,13 @@ function arrivalForm(code, extra = {}) {
       p_color: A.color || null, p_warranty_months: Number(A.warranty) || 0, p_buy_price: buyRaw === '' ? null : Math.round(Number(buyRaw)),
       p_existing: A.existing, p_client_ref: uuid() });
     if (error) { btn.disabled = false; btn.textContent = '✓ Enregistrer'; return toast(cleanErr(error), true); }
-    A.n++;
+    A.n++; A.saved.push(code);
     const m = S.products.find(x => x.id === A.pid);
     if (m && !A.existing) m.stock_qty = Number(m.stock_qty) + 1;
     S.units = S.units || []; S.units.push({ id: null, product_id: A.pid, serial: code, serial2: s2 || null, color: A.color || null, warranty_months: Number(A.warranty) || 0 });
     try { navigator.vibrate && navigator.vibrate([40, 40, 40]); } catch (e) {}
     const rest = A.existing && m ? Number(m.stock_qty) - unitsOf(m.id).length : 1;
-    if (A.existing && rest <= 0) { toast('Toutes les boîtes de ' + m.name + ' sont scannées ✓'); closeSheet(); await loadProducts(); return draw(); }
+    if (A.existing && rest <= 0) { toast('Toutes les boîtes de ' + m.name + ' sont scannées ✓'); closeSheet(); await loadProducts(); draw(); return labelsOffer(A.saved); }
     arrivalStart(`✓ ${esc(m ? m.name : '')}${A.color ? ' · ' + esc(A.color) : ''} enregistré. Boîte suivante ?`);
     if (canScan()) $('#ar-scan').click();
   };
@@ -4024,9 +4025,11 @@ function code128(text) {
   const s = String(text || '');
   if (!s.length || s.length > 40) return null;
   let vals;
-  if (/^\d+$/.test(s) && s.length % 2 === 0) {
+  if (/^\d+$/.test(s) && s.length >= 2) {
+    // Chiffres : jeu C (2 chiffres par barre, plus court). Nombre impair (IMEI = 15) : le dernier en jeu B.
     vals = [105];
-    for (let i = 0; i < s.length; i += 2) vals.push(Number(s.slice(i, i + 2)));
+    for (let i = 0; i + 1 < s.length; i += 2) vals.push(Number(s.slice(i, i + 2)));
+    if (s.length % 2) vals.push(100, s.charCodeAt(s.length - 1) - 32);
   } else {
     if (!/^[\x20-\x7e]+$/.test(s)) return null;
     vals = [104, ...[...s].map(c => c.charCodeAt(0) - 32)];
@@ -4065,11 +4068,76 @@ function labelsPdf(items, showPrice) {
   return pdf.build('Étiquettes ' + S.shop.name);
 }
 
+// Étiquettes des appareils : grandes (2 x 6 par page A4), avec l'IMEI en gros code-barres, faciles à
+// scanner à la vente (le code d'origine sur la boîte est souvent tout petit). units = [{ serial, color, product_id }]
+function unitLabelsPdf(units) {
+  const pdf = newPdf(), COLS = 2, ROWS = 6, MX = 24, MY = 30;
+  const CW = (pdf.W - 2 * MX) / COLS, RH = (pdf.H - 2 * MY) / ROWS;
+  units.forEach((u, n) => {
+    const k = n % (COLS * ROWS);
+    if (k === 0) pdf.page();
+    const x = MX + (k % COLS) * CW, y = MY + Math.floor(k / COLS) * RH, p = S.products.find(q => q.id === u.product_id) || {};
+    pdf.line(x + 6, x + CW - 6, y + RH - 1, [0.85, 0.87, 0.85], 0.5);
+    pdf.text(x + CW / 2, y + 18, pdfWrap(p.name || '', true, 11, CW - 20)[0] || '', { size: 11, bold: true, align: 'center' });
+    const sub = [u.color, Number(u.warranty_months) ? 'garantie ' + u.warranty_months + ' mois' : ''].filter(Boolean).join(' · ');
+    if (sub) pdf.text(x + CW / 2, y + 32, sub, { size: 9, align: 'center', color: [0.3, 0.33, 0.31] });
+    const mods = code128(u.serial);
+    if (mods) {
+      const total = mods.reduce((a, b) => a + b, 0) + 20, mw = Math.min(2, (CW - 24) / total), bw = (total - 20) * mw;
+      let bx = x + (CW - bw) / 2;
+      mods.forEach((m, i) => { if (i % 2 === 0) pdf.rect(bx, y + 40, m * mw, 52, [0, 0, 0]); bx += m * mw; });
+    }
+    pdf.text(x + CW / 2, y + 108, (p.track_kind === 'serial' ? 'S/N ' : 'IMEI ') + u.serial, { size: 11, bold: true, align: 'center' });
+  });
+  return pdf.build('Étiquettes appareils ' + S.shop.name);
+}
+function downloadPdf(bytes, name) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  const a = document.createElement('a'); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 15000);
+}
+// Après un arrivage : proposer les étiquettes des boîtes reçues.
+function labelsOffer(serials) {
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Étiquettes">
+    <h2>✅ ${serials.length} boîte${serials.length > 1 ? 's' : ''} enregistrée${serials.length > 1 ? 's' : ''}</h2>
+    <p style="margin:0">Imprimer une grande étiquette IMEI pour chaque boîte ? À la vente, le scan sera immédiat.</p>
+    <button class="btn huge" id="lo-yes">🏷️ Imprimer les étiquettes</button><button class="btn ghost" id="lo-no">Pas maintenant</button></div></div>`;
+  $('#lo-yes').onclick = () => unitLabelsSheet(serials);
+  $('#lo-no').onclick = closeSheet;
+}
+// Choisir les appareils dont on imprime l'étiquette (par défaut : ceux d'un modèle, ou une liste donnée).
+function unitLabelsSheet(preset) {
+  const models = S.products.filter(isTracked).filter(p => unitsOf(p.id).length);
+  const pre = new Set(preset || []);
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Étiquettes des appareils">
+    <h2>🏷️ Étiquettes des appareils</h2>
+    <p class="muted" style="margin:0;font-size:13px">Une grande étiquette par boîte, avec l'IMEI en gros code-barres. Collez-la sur la boîte : à la vente, le scan est immédiat. 12 étiquettes par page A4.</p>
+    <div class="row"><button class="btn ghost small" type="button" id="ul-all">Toutes</button><button class="btn ghost small" type="button" id="ul-none">Aucune</button></div>
+    <div style="max-height:48vh;overflow:auto;display:grid;gap:10px">${models.map(p => `<div><div class="nm" style="font-weight:700">${esc(p.name)}</div>
+      ${unitsOf(p.id).map(u => `<label style="display:flex;align-items:center;gap:10px;font-size:14px;padding:4px 0"><input type="checkbox" data-ul="${esc(u.serial)}" ${!preset || pre.has(u.serial) ? 'checked' : ''} style="width:22px;height:22px;margin:0;flex:0 0 auto">
+        <span>${esc(u.color || 'Couleur ?')} · <span class="muted">${esc(codeName(p.track_kind))} ${esc(u.serial)}</span></span></label>`).join('')}</div>`).join('') || '<p class="empty">Aucun appareil en stock.</p>'}</div>
+    <div class="row"><button class="btn" type="submit">Créer le PDF</button><button class="btn ghost" type="button" id="cancel">Fermer</button></div></form></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  $('#ul-all').onclick = () => document.querySelectorAll('[data-ul]').forEach(i => { i.checked = true; });
+  $('#ul-none').onclick = () => document.querySelectorAll('[data-ul]').forEach(i => { i.checked = false; });
+  $('#sheet').onsubmit = ev => {
+    ev.preventDefault();
+    const pick = new Set([...document.querySelectorAll('[data-ul]:checked')].map(i => i.dataset.ul));
+    const list = (S.units || []).filter(u => pick.has(u.serial));
+    if (!list.length) return toast('Choisissez au moins un appareil.', true);
+    downloadPdf(unitLabelsPdf(list), 'Etiquettes-appareils-' + new Date().toISOString().slice(0, 10) + '.pdf');
+    toast(`${list.length} étiquette${list.length > 1 ? 's' : ''} créée${list.length > 1 ? 's' : ''} : ouvrez le PDF pour l'imprimer.`);
+  };
+}
+
 function openLabels() {
   const prods = S.products.filter(p => p.barcode);
   const missing = S.products.length - prods.length;
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Étiquettes">
     <h2>Imprimer des étiquettes</h2>
+    ${S.products.some(isTracked) ? `<button class="btn" type="button" id="lb-units" style="height:auto;padding:12px">📱 Étiquettes des appareils (IMEI)<br><small style="font:400 12.5px var(--f-body);opacity:.85">une grande étiquette par boîte, facile à scanner</small></button>` : ''}
     <p class="muted" style="margin:0;font-size:13px">Choisissez le nombre d'étiquettes par produit (0 = aucune). Planche A4 de 24 étiquettes, à imprimer puis découper. Collez-les sur l'article, son emballage ou l'étagère (produits en vrac).</p>
     ${missing ? `<div class="banner">${missing} produit(s) n'ont pas encore de code : ils en recevront un après la mise à jour de la base.</div>` : ''}
     <div class="row"><button class="btn ghost small" type="button" id="lb-all">1 pour tous</button><button class="btn ghost small" type="button" id="lb-none">Aucun</button></div>
@@ -4080,6 +4148,7 @@ function openLabels() {
     <div class="row"><button class="btn" type="submit">Créer le PDF</button><button class="btn ghost" type="button" id="cancel">Fermer</button></div></form></div>`;
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  const lu = $('#lb-units'); if (lu) lu.onclick = () => unitLabelsSheet();
   $('#lb-all').onclick = () => document.querySelectorAll('[data-lb]').forEach(i => { i.value = 1; });
   $('#lb-none').onclick = () => document.querySelectorAll('[data-lb]').forEach(i => { i.value = 0; });
   $('#sheet').onsubmit = ev => {
