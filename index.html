@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-27c';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-28a';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1550,7 +1550,15 @@ const DEV_TYPES = [['Smartphones', '📱', 'Smartphone', 'imei'], ['Téléphones
   ['Tablettes', '📲', 'Tablette', 'imei'], ['Ordinateurs', '💻', 'Ordinateur', 'serial']];
 const devType = cat => DEV_TYPES.find(t => t[0] === cat);
 const isTracked = p => !!(p && p.track_kind);
-const normCode = c => String(c || '').replace(/\s/g, '').toUpperCase();
+// Numéro nettoyé. Un IMEI peut arriver sous une autre forme : « 352060484524259 / 08 » (écran *#06#),
+// ou IMEISV à 16 chiffres (14 chiffres de l'IMEI + version du logiciel) : on refait l'IMEI de 15 chiffres.
+const luhnDigit = b14 => { let s = 0; for (let i = 0; i < 14; i++) { let d = Number(b14[i]); if (i % 2) { d *= 2; if (d > 9) d -= 9; } s += d; } return String((10 - s % 10) % 10); };
+const normCode = c => {
+  const v = String(c || '').replace(/\s/g, '').toUpperCase(), m = v.match(/^([0-9]{15})\/[0-9]{1,2}$/);
+  if (m) return m[1];
+  if (/^[0-9]{16}$/.test(v)) return v.slice(0, 14) + luhnDigit(v);
+  return v;
+};
 const codeName = k => k === 'serial' ? 'N° de série' : 'IMEI';
 const shortCode = c => String(c || '').length > 9 ? '…' + String(c).slice(-6) : String(c || '');
 const WARR = [0, 3, 6, 12, 24];
@@ -1638,7 +1646,7 @@ const devPick = codes => {
   const n = codes.map(c => normCode(c.replace(/^(IMEI|S\/?N|SN|SERIAL)[^0-9A-Z]*/i, '')));
   return n.find(imeiOk) || n.find(c => /[A-Z]/.test(c) && /[0-9]/.test(c) && /^[0-9A-Z][0-9A-Z/.-]{3,39}$/.test(c)) || null;
 };
-const DEV_HINT = 'Visez le code marqué IMEI (ou S/N pour un ordinateur).';
+const DEV_HINT = 'Visez le code marqué IMEI (ou S/N pour un ordinateur), à 15-20 cm.';
 const DEV_MISS = 'Ce code est celui du modèle : visez le code marqué IMEI ou S/N.';
 // Vente : un appareil en stock d'abord, sinon un produit (accessoire), sinon un IMEI.
 const salePick = codes => codes.find(c => unitByCode(normCode(c))) || codes.find(c => findByCode(c)) || devPick(codes);
@@ -1735,7 +1743,7 @@ function arrivalStart(msg) {
   $('#ar-done').onclick = done;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') done(); };
   $('#sheet').onsubmit = ev => { ev.preventDefault(); const c = $('#ar-code').value; if (c.trim()) arrivalCode(c); };
-  const sc = $('#ar-scan'); if (sc) sc.onclick = () => openScanner('Arrivage : scannez la boîte', code => { arrivalCode(code); return false; }, { pick: devPick, hint: DEV_HINT, miss: DEV_MISS });
+  const sc = $('#ar-scan'); if (sc) sc.onclick = () => openScanner('Arrivage : scannez la boîte', code => { arrivalCode(code); return false; }, { pick: devPick, hint: DEV_HINT, miss: DEV_MISS, zoom: true });
 }
 async function arrivalCode(raw) {
   const c = normCode(raw);
@@ -1782,7 +1790,7 @@ function arrivalForm(code, extra = {}) {
   const nm = $('#ar-newm'); if (nm) nm.onclick = () => { const k = keep();
     modelForm({ kind: imei ? 'Smartphones' : 'Ordinateurs' }, pid => { if (pid) A.pid = pid; arrivalForm(code, k); }); };
   const s2 = $('#ar-s2scan'); if (s2) s2.onclick = () => openScanner('Scanner le 2e IMEI', c2 => { const v = normCode(c2);
-    if (v === code) { toast('C\'est le même IMEI : scannez l\'autre.', true); return true; } $('#ar-s2').value = v; return false; }, { pick: cs => cs.map(normCode).find(c => imeiOk(c) && c !== code) || null, hint: 'Visez l\'autre code IMEI.' });
+    if (v === code) { toast('C\'est le même IMEI : scannez l\'autre.', true); return true; } $('#ar-s2').value = v; return false; }, { pick: cs => cs.map(normCode).find(c => imeiOk(c) && c !== code) || null, hint: 'Visez l\'autre code IMEI.', zoom: true });
   $('#cancel').onclick = () => arrivalStart();
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') arrivalStart(); };
   $('#sheet').onsubmit = async ev => {
@@ -1916,7 +1924,7 @@ function findUnitSheet() {
   $('#cancel').onclick = closeSheet;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#sheet').onsubmit = ev => { ev.preventDefault(); if ($('#fu-code').value.trim()) unitSheet($('#fu-code').value); };
-  const sc = $('#fu-scan'); if (sc) sc.onclick = () => openScanner('Scanner l\'appareil', c => { unitSheet(c); return false; }, { pick: devPick, hint: DEV_HINT, miss: DEV_MISS });
+  const sc = $('#fu-scan'); if (sc) sc.onclick = () => openScanner('Scanner l\'appareil', c => { unitSheet(c); return false; }, { pick: devPick, hint: DEV_HINT, miss: DEV_MISS, zoom: true });
   const st = $('#fu-stolen'); if (st) st.onclick = stolenList;
 }
 async function stolenList() {
@@ -3192,7 +3200,7 @@ async function convertSheet(g) {
     const u = unitByCode(normCode(code)), c = u && document.querySelector(`[data-cu="${b.dataset.cus}"][value="${u.serial}"]`);
     if (!c) { toast('Cet appareil n\'est pas un ' + (S.products.find(p => p.id === b.dataset.cus) || {}).name + ' en stock.', true); return true; }
     if (!c.checked) { c.checked = true; c.onchange(); }
-    return true; }, { pick: cs => cs.find(c => unitByCode(normCode(c))) || devPick(cs), hint: DEV_HINT }));
+    return true; }, { pick: cs => cs.find(c => unitByCode(normCode(c))) || devPick(cs), hint: DEV_HINT, zoom: true }));
   const ca = $('#cq-adv'); if (ca) ca.onchange = upd;
   $('#cancel').onclick = () => quoteSheet(q.id);
   $('#sheet').onsubmit = async ev => {
@@ -3708,8 +3716,9 @@ async function openScanner(title, onCode, opts = {}) {
       <div style="position:absolute;left:8%;right:8%;top:38%;height:24%;border:2px solid #6fcf97;border-radius:8px;box-shadow:0 0 0 999px rgba(0,0,0,.25)"></div>
     </div>
     <p class="muted" id="scan-msg" style="margin:0;text-align:center">${esc(opts.hint || 'Placez le code-barres dans le cadre.')}</p>
-    <p class="muted" style="margin:0;text-align:center;font-size:12.5px">Approchez à 10 cm environ, code bien droit dans le cadre vert.</p>
-    <div class="row"><button class="btn ghost" type="button" id="scan-light" hidden>🔦 Lumière</button><button class="btn ghost" type="button" id="scan-x">Terminer</button></div></div></div>`;
+    <p class="muted" style="margin:0;text-align:center;font-size:12.5px">Code bien droit dans le cadre vert. Image floue ? Reculez un peu et touchez « Zoom ».</p>
+    <div class="row"><button class="btn ghost" type="button" id="scan-zoom" hidden>🔍 Zoom</button><button class="btn ghost" type="button" id="scan-light" hidden>🔦 Lumière</button></div>
+    <button class="btn ghost" type="button" id="scan-x">Terminer</button></div></div>`;
   document.body.appendChild(host);
   $('#scan-x').onclick = stopScan;
   const me = SCAN = { stopped: false, last: '', lastAt: 0 };
@@ -3733,6 +3742,16 @@ async function openScanner(title, onCode, opts = {}) {
     // Lampe du téléphone (si elle existe) : utile dans une boutique sombre.
     try {
       const tr = me.stream.getVideoTracks()[0], cap = tr.getCapabilities ? tr.getCapabilities() : {};
+      // Mise au point continue, et zoom : un petit code (IMEI) se lit mieux de 20 cm avec le zoom que de
+      // trop près (l'image devient floue, le téléphone n'arrive pas à faire la mise au point).
+      try { if ((cap.focusMode || []).includes('continuous')) await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e4) {}
+      if (cap.zoom && cap.zoom.max > 1) {
+        const zb = $('#scan-zoom'), steps = [...new Set([1, 2, 3].map(z => Math.min(z, cap.zoom.max)))];
+        let zi = opts.zoom ? Math.min(1, steps.length - 1) : 0;
+        const setZ = async () => { try { await tr.applyConstraints({ advanced: [{ zoom: Math.max(cap.zoom.min || 1, steps[zi]) }] }); } catch (e5) {}
+          zb.textContent = '🔍 Zoom ×' + steps[(zi + 1) % steps.length]; };
+        zb.hidden = false; zb.onclick = () => { zi = (zi + 1) % steps.length; setZ(); }; setZ();
+      }
       if (cap.torch) { const b = $('#scan-light'); b.hidden = false; let on = false;
         b.onclick = async () => { on = !on; try { await tr.applyConstraints({ advanced: [{ torch: on }] }); b.textContent = on ? '🔦 Éteindre' : '🔦 Lumière'; } catch (e2) {} }; }
     } catch (e1) {}
@@ -3942,6 +3961,10 @@ function softRunsG(gray, w) {
 }
 function softRow(gray, w, out) {
   for (const f of [softRunsT, softRunsG]) { const R = f(gray, w); if (R && R.runs.length >= 19) softTry(R, out); }
+  if (!out.size) {                                              // code clair sur fond sombre (écran en mode sombre)
+    const inv = gray.map(v => 255 - v);
+    for (const f of [softRunsT, softRunsG]) { const R = f(inv, w); if (R && R.runs.length >= 19) softTry(R, out); }
+  }
 }
 function softTry(R, out) {
   // r[-1] = marge blanche : on ajoute la marge devant pour le contrôle, puis on cherche à chaque barre.
