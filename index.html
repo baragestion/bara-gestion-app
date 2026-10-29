@@ -251,7 +251,7 @@ async function leave(msg) {
   try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch (e) {}
   Object.keys(mem).filter(k => k.startsWith('sb-')).forEach(k => delete mem[k]);
   clearCache(); dropLock(); S.pwOk = false;
-  S.user = null; S.kick = null; S.offline = false;
+  S.user = null; S.kick = null; S.offline = false; S.adminMode = false; S.isAdmin = false;
   drawLogin(msg || null);
 }
 
@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-29i';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-29k';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -971,6 +971,8 @@ async function loadContext() {
   }
   S.memberships = (data || []).filter(m => m.shops);
   if (!S.memberships.length) {
+    await loadAdmin();
+    if (S.isAdmin) return adminGate();
     $('#app').innerHTML = `<div class="login"><div class="brand">Bara Gestion</div>
       <div class="banner">Ce compte n'est rattaché à aucune boutique. Demandez au propriétaire de vous ajouter.</div>
       <button class="btn ghost" id="out">Se déconnecter</button></div>`;
@@ -993,7 +995,7 @@ async function selectShop(id) {
   S.cart = new Map(); S.cartUnits = new Map(); S.arr = null; S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = (m.role === 'owner' || m.role === 'manager') ? 'home' : 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
   S.top = null;
-  await Promise.all([loadProducts().then(() => Promise.all([canCredit() ? loadCustomers(true) : null, loadTop()])), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings()]);
+  await Promise.all([loadProducts().then(() => Promise.all([canCredit() ? loadCustomers(true) : null, loadTop()])), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings(), loadAdmin()]);
   saveCache();
   gate();
   draw();
@@ -1072,6 +1074,7 @@ function subBanner() {
 const TAB_IC = { home: '🏠', sale: '🛒', products: '📦', history: '🧾', clients: '👥', cash: '💰', report: '📊', team: '⚙️', more: '☰' };
 const MORE_TABS = ['history', 'cash', 'report', 'team', 'more'];
 function draw() {
+  if (S.adminMode) return;          // espace administrateur ouvert : la boutique ne redessine pas par-dessus
   if (S.tab === 'count' && !isManager()) S.tab = 'products';
   let tabs;
   if (S.offline) { tabs = [['sale', 'Vendre'], ['products', 'Produits']]; if (!['sale', 'products'].includes(S.tab)) S.tab = 'sale'; }   // le reste demande internet
@@ -1156,10 +1159,353 @@ function viewMore() {
     ${T('cash', '💰', 'Caisse', 'ouvrir, dépenses, fermer')}
     ${T('report', '📊', 'Bilan', 'chiffres, marge, dépenses')}
     ${S.role === 'owner' ? T('team', '⚙️', 'Équipe et réglages', 'employés, droits, sécurité') : ''}
+    ${S.isAdmin && !S.offline ? T('admin', '👑', 'Administration', 'boutiques, paiements') : ''}
     <button class="htile" id="guide" style="min-height:120px"><span class="hic" aria-hidden="true" style="background:var(--accent-soft)">👋</span><span class="hl">Guide</span><span class="muted" style="font-size:12.5px;font-weight:400">comment ça marche</span></button>
   </div>`;
   $('#guide').onclick = () => guideSheet();
-  document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+  document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => b.dataset.go === 'admin' ? adminGate() : go(b.dataset.go));
+}
+
+/* ===== 👑 Espace administrateur (propriétaire du projet seulement) =====
+   Double authentification obligatoire : la base refuse tout sans le code à 6 chiffres.
+   L'administrateur ne voit jamais les ventes, le stock ni les clients : seulement les boutiques
+   (nom, métier, contact) et leur abonnement. */
+const SHOP_TYPES = { alimentation: ['🛒', 'Alimentation'], vetements: ['👕', 'Vêtements'], telephones: ['📱', 'Téléphones'],
+  cosmetiques: ['💄', 'Cosmétiques'], pieces: ['🏍️', 'Pièces moto'], materiaux: ['🧱', 'Quincaillerie'] };
+const ADM_ST = { trial: ['🆓', 'Essai', 'var(--accent)'], active: ['🟢', 'Active', 'var(--ok, #1f7a4d)'], grace: ['🟠', '7 jours de grâce', 'var(--warn)'],
+  read_only: ['🔴', 'Expirée (lecture seule)', 'var(--bad)'], suspended: ['⏸️', 'Suspendue', 'var(--bad)'] };
+const PAY_M = { orange_money: '🟠 Orange Money', moov_money: '🔵 Moov Money', cash: '💵 Espèces', other: 'Autre' };
+const PRICE = 20000;
+const admDay = s => new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const waLink = (tel, txt) => 'https://wa.me/' + String(tel || '').replace(/[^\d]/g, '') + '?text=' + encodeURIComponent(txt);
+const isMfaErr = e => /double authentification|BG010/i.test((e && (e.message || e.code)) || '');
+
+async function loadAdmin() {
+  S.isAdmin = false;
+  if (S.offline) return;
+  try { const { data } = await sb.rpc('admin_whoami'); S.isAdmin = !!(data && data.admin); } catch (e) {}
+}
+async function admCall(body) {
+  // Nom exact de la fonction dans Supabase (créée avec un « A » majuscule le 29/10).
+  const { data, error } = await sb.functions.invoke('Admin-shops', { body });
+  if (error) {
+    let msg = cleanErr(error);
+    try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) {}
+    if (/Failed to send|non-2xx|not found|404/i.test(msg)) msg = 'La fonction « admin-shops » n\'est pas encore installée dans Supabase.';
+    throw new Error(msg);
+  }
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+async function admRpc(name, args) {
+  const r = await sb.rpc(name, args || {});
+  if (r.error && isMfaErr(r.error)) { adminGate(); throw new Error('Double authentification requise'); }
+  if (r.error && /admin_|function .* does not exist|schema cache/i.test(r.error.message || '')) throw new Error('Installez d\'abord la mise à jour 019 dans Supabase.');
+  if (r.error) throw new Error(cleanErr(r.error));
+  return r.data;
+}
+function admShell(inner) {
+  S.adminMode = true; stopScan();
+  $('#app').innerHTML = `<header class="top" style="display:flex;align-items:center;gap:8px;padding:10px 14px">
+      <div style="flex:1 1 auto;min-width:0"><b style="font:800 18px var(--f-display)">👑 Administration</b><br><span class="muted" style="font-size:12.5px">Bara Gestion</span></div>
+      ${S.memberships && S.memberships.length ? '<button class="btn ghost small" id="adm-shop" style="flex:0 0 auto">‹ Ma boutique</button>' : ''}
+      <button class="btn ghost small" id="adm-out" style="flex:0 0 auto" aria-label="Se déconnecter">🚪</button></header>
+    <main id="view" class="stack" style="padding:14px;gap:12px;max-width:720px;margin:0 auto">${inner}</main><div id="sheet-host"></div>`;
+  const b = $('#adm-shop'); if (b) b.onclick = () => { S.adminMode = false; S.tab = 'more'; draw(); };
+  $('#adm-out').onclick = () => leave();
+}
+
+// Étape 1 : le code à 6 chiffres (ou sa mise en place, la première fois).
+async function adminGate() {
+  admShell('<p class="empty">Chargement…</p>');
+  try {
+    const { data: lv } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (lv && lv.currentLevel === 'aal2') return adminHome();
+    const { data: f, error } = await sb.auth.mfa.listFactors();
+    if (error) throw error;
+    const ok = (f.totp || []).find(x => x.status === 'verified');
+    if (ok) return mfaCode(ok.id);
+    for (const x of (f.all || []).filter(x => x.status !== 'verified')) { try { await sb.auth.mfa.unenroll({ factorId: x.id }); } catch (e) {} }
+    const { data: en, error: e2 } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Bara Gestion admin' });
+    if (e2) throw e2;
+    mfaCode(en.id, en.totp);
+  } catch (e) { $('#view').innerHTML = `<div class="banner bad">${esc(cleanErr(e))}</div><button class="btn" id="adm-retry">Réessayer</button>`; $('#adm-retry').onclick = adminGate; }
+}
+function mfaCode(factorId, totp) {
+  $('#view').innerHTML = `<section class="card stack" style="gap:12px;text-align:center">
+    <div style="font-size:44px" aria-hidden="true">🔐</div>
+    <h2 style="margin:0">${totp ? 'Protéger votre espace administrateur' : 'Votre code de sécurité'}</h2>
+    ${totp ? `<div class="stack" style="gap:8px;text-align:left;font-size:15px">
+        <div><b>1.</b> Installez <b>Google Authenticator</b> (gratuit) sur votre téléphone.</div>
+        <div><b>2.</b> Touchez ce bouton (sur ce téléphone) :</div>
+        <a class="btn" href="${esc(totp.uri)}" style="text-decoration:none">📲 Ajouter dans Google Authenticator</a>
+        <div class="muted" style="font-size:13px">Sur un ordinateur : ouvrez Google Authenticator → ＋ → scannez :</div>
+        <img src="${esc(totp.qr_code)}" alt="Code QR" style="width:180px;height:180px;margin:0 auto;background:#fff;border-radius:8px">
+        <div class="muted" style="font-size:13px">Ou tapez cette clé dans l'application :</div>
+        <div style="font:700 15px monospace;word-break:break-all;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px;user-select:all">${esc(totp.secret)}</div>
+        <div><b>3.</b> Tapez le code à 6 chiffres affiché :</div></div>`
+      : '<div class="muted">Ouvrez Google Authenticator et tapez le code « Bara Gestion ».</div>'}
+    <input id="mfa-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" style="font:800 30px var(--f-display);text-align:center;letter-spacing:8px;height:64px">
+    <button class="btn huge" id="mfa-ok">✓ Valider</button>
+    ${totp ? '<div class="banner" style="margin:0;text-align:left">⚠️ Si vous changez de téléphone, ajoutez d\'abord le code sur le nouveau. Sans lui, l\'espace administrateur reste fermé.</div>' : ''}</section>`;
+  const go = async () => {
+    const code = $('#mfa-code').value.replace(/\D/g, '');
+    if (code.length !== 6) return toast('Tapez les 6 chiffres.', true);
+    $('#mfa-ok').disabled = true;
+    const { error } = await sb.auth.mfa.challengeAndVerify({ factorId, code });
+    if (error) { $('#mfa-ok').disabled = false; $('#mfa-code').value = ''; return toast(/invalid|expired/i.test(error.message || '') ? 'Code faux ou trop ancien : tapez le nouveau code.' : cleanErr(error), true); }
+    toast('Bienvenue 👑'); adminHome();
+  };
+  $('#mfa-ok').onclick = go;
+  $('#mfa-code').oninput = ev => { if (ev.target.value.replace(/\D/g, '').length === 6) go(); };
+  $('#mfa-code').focus();
+}
+
+// Étape 2 : tableau de bord + liste des boutiques.
+async function adminHome() {
+  admShell('<p class="empty">Chargement…</p>');
+  let d, shops;
+  try { [d, shops] = await Promise.all([admRpc('admin_dashboard'), admRpc('admin_shops')]); }
+  catch (e) { if (!isMfaErr(e)) $('#view').innerHTML = `<div class="banner bad">${esc(e.message)}</div><button class="btn" id="adm-retry">Réessayer</button>`;
+    const r = $('#adm-retry'); if (r) r.onclick = adminHome; return; }
+  S.adm = { shops: shops || [], d, f: S.adm ? S.adm.f : '', q: S.adm ? S.adm.q : '' };
+  const remind = s => s.status === 'grace' || (['trial', 'active'].includes(s.status) && s.days_left <= 7);
+  const F = { '': ['Toutes', () => true], remind: ['🟠 À relancer', remind], trial: ['🆓 Essai', s => s.status === 'trial'], active: ['🟢 Actives', s => s.status === 'active'],
+    expired: ['🔴 Expirées', s => s.status === 'read_only' || s.status === 'grace'], suspended: ['⏸️ Suspendues', s => s.status === 'suspended'] };
+  const T = (k, n, l, c) => `<button class="metric" data-af="${k}" style="text-align:left;cursor:pointer;${S.adm.f === k ? 'outline:2px solid var(--accent)' : ''}"><span>${l}</span><b style="color:${c || 'inherit'}">${n}</b></button>`;
+  $('#view').innerHTML = `<section class="hero"><div style="opacity:.85;font-size:14px">Revenus de ce mois</div>
+      <div class="hero-n">${esc(money(d.month_revenue))}</div>
+      <div class="hero-s"><span>🧾 ${d.month_payments} paiement${d.month_payments > 1 ? 's' : ''}</span><span>Depuis le début : ${esc(money(d.total_revenue))}</span></div></section>
+    <div class="grid2" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+      ${T('', d.shops, '🏪 Boutiques')}${T('active', d.active, '🟢 Actives')}${T('trial', d.trial, '🆓 Essai')}
+      ${T('remind', d.to_remind, '🟠 À relancer', d.to_remind ? 'var(--warn)' : '')}${T('expired', d.read_only + d.grace, '🔴 Expirées', d.read_only + d.grace ? 'var(--bad)' : '')}${T('suspended', d.suspended, '⏸️ Suspendues')}</div>
+    <button class="btn huge" id="adm-new">＋ Nouvelle boutique</button>
+    <div class="row"><button class="btn ghost" id="adm-journal">📜 Journal</button><button class="btn ghost" id="adm-help">❓ Aide</button></div>
+    <input id="adm-q" type="search" placeholder="🔍 Chercher une boutique ou un propriétaire" value="${esc(S.adm.q)}" style="height:50px;font-size:16px">
+    <div class="muted" style="font-weight:700;font-size:13px">${esc(F[S.adm.f][0])}</div>
+    <div class="plist" id="adm-list"></div>`;
+  const list = () => {
+    const t = S.adm.q.trim().toLowerCase();
+    const l = S.adm.shops.filter(F[S.adm.f][1]).filter(s => !t || (s.name + ' ' + (s.owner_name || '') + ' ' + (s.owner_phone || '')).toLowerCase().includes(t));
+    $('#adm-list').innerHTML = l.map(s => { const [ic, lab, col] = ADM_ST[s.status] || ['', s.status, ''];
+      const left = s.status === 'suspended' ? 'suspendue' : s.days_left >= 0 ? `${s.days_left} j restant${s.days_left > 1 ? 's' : ''}` : `finie depuis ${-s.days_left} j`;
+      return `<button class="prow" data-as="${esc(s.shop_id)}"><span style="font-size:30px;flex:0 0 auto" aria-hidden="true">${(SHOP_TYPES[s.shop_type] || ['🏪'])[0]}</span>
+        <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(s.name)}</span><br><span class="sub">${esc(s.owner_name || '')}${s.owner_phone ? ' · ' + esc(s.owner_phone) : ''}</span></span>
+        <span style="text-align:right;flex:0 0 auto"><b style="color:${col};font-size:14px">${ic} ${esc(lab.split(' (')[0])}</b><br><span class="sub">${esc(left)}</span></span></button>`; }).join('')
+      || '<p class="empty">Aucune boutique.</p>';
+    document.querySelectorAll('[data-as]').forEach(b => b.onclick = () => adminShopSheet(b.dataset.as));
+  };
+  list();
+  $('#adm-q').oninput = ev => { S.adm.q = ev.target.value; list(); };
+  document.querySelectorAll('[data-af]').forEach(b => b.onclick = () => { S.adm.f = S.adm.f === b.dataset.af ? '' : b.dataset.af; adminHome(); });
+  $('#adm-new').onclick = () => adminNewShop({});
+  $('#adm-journal').onclick = adminJournal;
+  $('#adm-help').onclick = adminHelp;
+}
+function admSheet(html) {
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog">${html}</div></div>`;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  const c = $('#cancel'); if (c) c.onclick = closeSheet;
+}
+const admShop = id => (S.adm.shops || []).find(s => s.shop_id === id);
+
+function remindText(s) {
+  const who = s.owner_name ? 'Bonjour ' + s.owner_name : 'Bonjour';
+  const end = admDay(s.ends_at);
+  if (s.status === 'trial') return `${who}, votre essai gratuit de Bara Gestion (${s.name}) se termine le ${end}.\nPour continuer : ${fmtNum.format(PRICE)} FCFA par mois (Orange Money ou Moov Money).\nMerci !`;
+  if (s.status === 'active') return `${who}, votre abonnement Bara Gestion (${s.name}) se termine le ${end}.\nPour continuer : ${fmtNum.format(PRICE)} FCFA par mois (Orange Money ou Moov Money).\nMerci !`;
+  if (s.status === 'grace') return `${who}, votre abonnement Bara Gestion (${s.name}) est terminé depuis le ${end}.\nVous pouvez encore vendre quelques jours. Ensuite, l'application passera en lecture seule.\nPour continuer : ${fmtNum.format(PRICE)} FCFA par mois. Merci !`;
+  return `${who}, votre abonnement Bara Gestion (${s.name}) est terminé depuis le ${end} : l'application est en lecture seule (vos données sont gardées).\nDès le paiement de ${fmtNum.format(PRICE)} FCFA, tout revient tout de suite. Merci !`;
+}
+
+function adminShopSheet(id) {
+  const s = admShop(id); if (!s) return;
+  const [ic, lab, col] = ADM_ST[s.status] || ['', s.status, ''];
+  const [ti, tl] = SHOP_TYPES[s.shop_type] || ['🏪', s.shop_type];
+  admSheet(`<h2>${ti} ${esc(s.name)}</h2>
+    <div class="muted">${esc(tl)} · créée le ${admDay(s.created_at)}</div>
+    <div class="grid2">
+      <div class="metric"><span>Statut</span><b style="color:${col};font-size:16px">${ic} ${esc(lab)}</b></div>
+      <div class="metric"><span>${s.status === 'trial' ? 'Fin de l\'essai' : 'Payé jusqu\'au'}</span><b style="font-size:16px">${admDay(s.ends_at)}</b></div>
+      <div class="metric"><span>Propriétaire</span><b style="font-size:16px">${esc(s.owner_name || '—')}</b></div>
+      <div class="metric"><span>Total payé</span><b style="font-size:16px">${esc(money(s.paid_total))}</b></div></div>
+    ${s.owner_phone ? `<div class="muted">📞 ${esc(s.owner_phone)}</div>` : '<div class="banner" style="margin:0">Pas de numéro : ajoutez-le pour les rappels WhatsApp.</div>'}
+    ${s.note ? `<div class="banner" style="margin:0">📝 ${esc(s.note)}</div>` : ''}
+    ${s.suspended && s.suspend_reason ? `<div class="banner bad" style="margin:0">Motif : ${esc(s.suspend_reason)}</div>` : ''}
+    <button class="btn huge" id="as-pay">💰 Enregistrer un paiement</button>
+    ${s.owner_phone ? `<a class="btn" id="as-wa" href="${esc(waLink(s.owner_phone, remindText(s)))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Rappel WhatsApp</a>` : ''}
+    <div class="row"><button class="btn ghost" id="as-pays">🧾 Paiements</button><button class="btn ghost" id="as-contact">📞 Contact et note</button></div>
+    <div class="row"><button class="btn ghost" id="as-pw">🔑 Mot de passe</button>
+      <button class="btn ghost" id="as-susp" style="color:${s.suspended ? 'inherit' : 'var(--bad)'}">${s.suspended ? '▶️ Réactiver' : '⏸️ Suspendre'}</button></div>
+    <button class="btn ghost" id="cancel">Fermer</button>`);
+  $('#as-pay').onclick = () => adminPay(s);
+  $('#as-pays').onclick = () => adminPayments(s);
+  $('#as-contact').onclick = () => adminContact(s);
+  $('#as-pw').onclick = () => adminPassword(s);
+  $('#as-susp').onclick = () => adminSuspend(s);
+}
+
+function adminPay(s, st) {
+  st = { m: 1, amount: PRICE, method: 'orange_money', ref: '', ...st };
+  admSheet(`<h2>💰 Paiement</h2><div class="muted">${esc(s.name)}</div>
+    <div class="muted" style="font-weight:700;font-size:13px">Combien de mois ?</div>
+    <div class="chips">${[1, 3, 12].map(m => `<button type="button" data-pm="${m}" aria-pressed="${st.m === m}" style="font-size:17px;padding:12px 18px">${m} mois</button>`).join('')}</div>
+    <label>Montant reçu (FCFA)<input id="pp-amount" type="number" inputmode="numeric" min="1" value="${esc(st.amount)}" style="font:800 24px var(--f-display);height:58px"></label>
+    <div class="muted" style="font-weight:700;font-size:13px">Payé par</div>
+    <div class="chips" style="flex-wrap:wrap">${['orange_money', 'moov_money', 'cash'].map(k => `<button type="button" data-pw="${k}" aria-pressed="${st.method === k}">${PAY_M[k]}</button>`).join('')}</div>
+    <label>Référence de la transaction ${st.method === 'cash' ? '(facultatif)' : '(dans le SMS reçu)'}<input id="pp-ref" maxlength="60" value="${esc(st.ref)}" placeholder="ex. PP241029.1234.A56789"></label>
+    <div class="banner" style="margin:0" id="pp-info"></div>
+    <button class="btn huge" id="pp-ok">✓ Enregistrer</button>
+    <button class="btn ghost" id="cancel">Annuler</button>`);
+  const base = s.ends_at && new Date(s.ends_at) > new Date() ? new Date(s.ends_at) : new Date();
+  const info = () => { $('#pp-info').textContent = `Nouvelle fin : ${admDay(new Date(base.getTime() + st.m * 30 * 864e5))}`; };
+  info();
+  const read = () => { st.amount = $('#pp-amount').value; st.ref = $('#pp-ref').value; };
+  document.querySelectorAll('[data-pm]').forEach(b => b.onclick = () => { read(); st.m = Number(b.dataset.pm); st.amount = PRICE * st.m; adminPay(s, st); });
+  document.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => { read(); st.method = b.dataset.pw; adminPay(s, st); });
+  $('#pp-ok').onclick = async () => {
+    read();
+    const amount = Math.round(Number(st.amount));
+    if (!(amount > 0)) return toast('Tapez le montant reçu.', true);
+    if (st.method !== 'cash' && st.ref.trim().length < 3) return toast('Tapez la référence du paiement (dans le SMS).', true);
+    const btn = $('#pp-ok'); btn.disabled = true;
+    try {
+      const r = await admRpc('admin_pay', { p_shop: s.shop_id, p_months: st.m, p_amount: amount, p_method: st.method, p_reference: st.ref.trim() || null });
+      await adminHome(); adminReceipt(admShop(s.shop_id) || s, r);
+    } catch (e) { btn.disabled = false; toast(e.message, true); }
+  };
+}
+function admReceiptText(s, r) {
+  return `Bara Gestion — Reçu n° ${r.receipt_no}\nBoutique : ${s.name}\nMontant : ${fmtNum.format(r.amount)} FCFA (${r.months} mois)\n`
+    + `Payé le : ${admDay(r.paid_at)} — ${PAY_M[r.method].replace(/^\S+ /, '')}${r.reference ? ' (réf. ' + r.reference + ')' : ''}\n`
+    + `Abonnement valable jusqu'au : ${admDay(r.ends_at || s.ends_at)}\nMerci pour votre confiance !`;
+}
+function adminReceipt(s, r) {
+  const txt = admReceiptText(s, r);
+  admSheet(`<h2>✅ Paiement enregistré</h2>
+    <div class="card" style="white-space:pre-line;font-size:15px;line-height:1.5">${esc(txt)}</div>
+    ${s.owner_phone ? `<a class="btn huge" href="${esc(waLink(s.owner_phone, txt))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Envoyer le reçu</a>` : ''}
+    <button class="btn ghost" id="rc-copy">📋 Copier</button>
+    <button class="btn ghost" id="cancel">Fermer</button>`);
+  $('#rc-copy').onclick = async () => { try { await navigator.clipboard.writeText(txt); toast('Copié ✓'); } catch (e) { toast('Copie impossible', true); } };
+}
+async function adminPayments(s) {
+  let l;
+  try { l = await admRpc('admin_payments', { p_shop: s.shop_id }); } catch (e) { return toast(e.message, true); }
+  admSheet(`<h2>🧾 Paiements</h2><div class="muted">${esc(s.name)} · total ${esc(money(s.paid_total))}</div>
+    <div class="plist">${(l || []).map((p, i) => `<button class="prow" data-pr="${i}"><span style="min-width:0;flex:1 1 auto"><span class="nm">Reçu n° ${p.receipt_no} · ${admDay(p.paid_at)}</span><br>
+      <span class="sub">${esc(PAY_M[p.method] || p.method)} · ${p.months} mois${p.reference ? ' · ' + esc(p.reference) : ''}</span></span><b class="num">${esc(money(p.amount))}</b></button>`).join('') || '<p class="empty">Aucun paiement (essai gratuit).</p>'}</div>
+    <button class="btn ghost" id="cancel">Fermer</button>`);
+  document.querySelectorAll('[data-pr]').forEach(b => b.onclick = () => adminReceipt(s, { ...l[b.dataset.pr], ends_at: null }));
+}
+function adminContact(s) {
+  admSheet(`<h2>📞 Contact et note</h2><div class="muted">${esc(s.name)}</div>
+    <label>Numéro WhatsApp du propriétaire<input id="ac-tel" type="tel" inputmode="tel" value="${esc(s.owner_phone || '')}" placeholder="+226 70 00 00 00" style="font-size:18px;height:50px"></label>
+    <label>Note (pour vous seul)<input id="ac-note" maxlength="300" value="${esc(s.note || '')}" placeholder="ex. paie toujours le 5"></label>
+    <button class="btn huge" id="ac-ok">✓ Enregistrer</button><button class="btn ghost" id="cancel">Annuler</button>`);
+  $('#ac-ok').onclick = async () => {
+    try { await admRpc('admin_set_contact', { p_shop: s.shop_id, p_phone: $('#ac-tel').value.trim() || null, p_note: $('#ac-note').value.trim() || null });
+      toast('Enregistré ✓'); await adminHome(); adminShopSheet(s.shop_id); } catch (e) { toast(e.message, true); }
+  };
+}
+function adminSuspend(s) {
+  if (s.suspended) {
+    admSheet(`<h2>▶️ Réactiver ${esc(s.name)} ?</h2><div class="muted">La boutique pourra de nouveau vendre (si l'abonnement n'est pas fini).</div>
+      <button class="btn huge" id="su-ok">▶️ Réactiver</button><button class="btn ghost" id="cancel">Annuler</button>`);
+  } else {
+    admSheet(`<h2>⏸️ Suspendre ${esc(s.name)} ?</h2><div class="muted">La boutique passe en lecture seule tout de suite : elle ne peut plus vendre. Ses données sont gardées.</div>
+      <label>Motif (obligatoire)<input id="su-why" maxlength="300" placeholder="ex. paiement refusé, fraude…"></label>
+      <button class="btn huge" id="su-ok" style="background:var(--bad)">⏸️ Suspendre</button><button class="btn ghost" id="cancel">Annuler</button>`);
+  }
+  $('#su-ok').onclick = async () => {
+    const why = $('#su-why') ? $('#su-why').value.trim() : null;
+    if (!s.suspended && (!why || why.length < 3)) return toast('Tapez le motif.', true);
+    try { await admRpc('admin_suspend', { p_shop: s.shop_id, p_suspended: !s.suspended, p_reason: why });
+      toast(s.suspended ? 'Boutique réactivée ✓' : 'Boutique suspendue'); await adminHome(); adminShopSheet(s.shop_id); } catch (e) { toast(e.message, true); }
+  };
+}
+const genPw = () => { const a = 'abcdefghjkmnpqrstuvwxyz23456789', r = new Uint32Array(10); crypto.getRandomValues(r); return [...r].map(x => a[x % a.length]).join(''); };
+const slug = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '').slice(0, 30);
+function accessText(login, pw, shopName) {
+  return `Bara Gestion — ${shopName}\nOuvrez : ${location.origin + location.pathname}\nIdentifiant : ${login}\nMot de passe : ${pw}\nGardez ce message pour vous seul.`;
+}
+function adminAccess(title, login, pw, shopName, phone) {
+  const txt = accessText(login, pw, shopName);
+  admSheet(`<h2>${title}</h2>
+    <div class="metric"><span>Identifiant</span><b style="font-size:22px;user-select:all">${esc(login)}</b></div>
+    <div class="metric"><span>Mot de passe</span><b style="font-size:22px;font-family:monospace;user-select:all">${esc(pw)}</b></div>
+    <div class="banner" style="margin:0">Donnez-les au propriétaire, de préférence en main propre. Ce mot de passe ne sera plus affiché.</div>
+    ${phone ? `<a class="btn" href="${esc(waLink(phone, txt))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Envoyer par WhatsApp</a>` : ''}
+    <button class="btn ghost" id="acc-copy">📋 Copier</button><button class="btn huge" id="cancel">Terminé</button>`);
+  $('#acc-copy').onclick = async () => { try { await navigator.clipboard.writeText(txt); toast('Copié ✓'); } catch (e) { toast('Copie impossible', true); } };
+}
+function adminPassword(s) {
+  const pw = genPw();
+  admSheet(`<h2>🔑 Nouveau mot de passe</h2><div class="muted">Propriétaire de ${esc(s.name)}. Ses téléphones seront déconnectés.</div>
+    <label>Nouveau mot de passe<input id="pw-new" value="${esc(pw)}" maxlength="72" style="font:700 20px monospace;height:54px"></label>
+    <button class="btn huge" id="pw-ok">🔑 Changer</button>
+    <button class="btn ghost" id="pw-login">Voir seulement l'identifiant</button><button class="btn ghost" id="cancel">Annuler</button>`);
+  $('#pw-ok').onclick = async () => {
+    const p = $('#pw-new').value; if (p.length < 8) return toast('8 caractères minimum.', true);
+    $('#pw-ok').disabled = true;
+    try { const r = await admCall({ action: 'reset_owner_password', shop_id: s.shop_id, password: p }); adminAccess('🔑 Mot de passe changé', r.login, p, s.name, s.owner_phone); }
+    catch (e) { $('#pw-ok').disabled = false; toast(e.message, true); }
+  };
+  $('#pw-login').onclick = async () => { try { const r = await admCall({ action: 'owner_login', shop_id: s.shop_id }); toast('Identifiant : ' + r.login); } catch (e) { toast(e.message, true); } };
+}
+function adminNewShop(v) {
+  v = { name: '', type: '', owner: '', phone: '', login: '', pw: genPw(), trial: 30, ...v };
+  admSheet(`<h2>＋ Nouvelle boutique</h2>
+    <label>Nom de la boutique<input id="ns-name" maxlength="100" value="${esc(v.name)}" placeholder="ex. Boutique Awa" style="font-size:18px;height:50px;font-weight:700"></label>
+    <div class="muted" style="font-weight:700;font-size:13px">Métier</div>
+    <div class="chips" style="flex-wrap:wrap">${Object.entries(SHOP_TYPES).map(([k, [i, l]]) => `<button type="button" data-nt="${k}" aria-pressed="${v.type === k}">${i} ${l}</button>`).join('')}</div>
+    <label>Nom du propriétaire<input id="ns-owner" maxlength="80" value="${esc(v.owner)}" placeholder="ex. Awa Ouédraogo"></label>
+    <label>Son numéro WhatsApp<input id="ns-phone" type="tel" inputmode="tel" value="${esc(v.phone)}" placeholder="+226 70 00 00 00"></label>
+    <label>Identifiant de connexion<input id="ns-login" maxlength="40" value="${esc(v.login)}" autocapitalize="none" placeholder="ex. awa.beguedo"></label>
+    <label>Mot de passe<input id="ns-pw" maxlength="72" value="${esc(v.pw)}" style="font-family:monospace"></label>
+    <div class="muted" style="font-weight:700;font-size:13px">Essai gratuit</div>
+    <div class="chips">${[30, 15, 0].map(d => `<button type="button" data-nd="${d}" aria-pressed="${v.trial === d}">${d ? d + ' jours' : 'Aucun'}</button>`).join('')}</div>
+    <button class="btn huge" id="ns-ok">✓ Créer la boutique</button><button class="btn ghost" id="cancel">Annuler</button>`);
+  const read = () => { v.name = $('#ns-name').value; v.owner = $('#ns-owner').value; v.phone = $('#ns-phone').value; v.login = $('#ns-login').value; v.pw = $('#ns-pw').value; };
+  $('#ns-owner').onchange = () => { if (!$('#ns-login').value.trim()) $('#ns-login').value = slug($('#ns-owner').value); };
+  document.querySelectorAll('[data-nt]').forEach(b => b.onclick = () => { read(); v.type = b.dataset.nt; adminNewShop(v); });
+  document.querySelectorAll('[data-nd]').forEach(b => b.onclick = () => { read(); v.trial = Number(b.dataset.nd); adminNewShop(v); });
+  $('#ns-ok').onclick = async () => {
+    read();
+    if (v.name.trim().length < 2) return toast('Tapez le nom de la boutique.', true);
+    if (!v.type) return toast('Touchez le métier.', true);
+    if (!v.owner.trim()) return toast('Tapez le nom du propriétaire.', true);
+    if (!/^[a-z0-9][a-z0-9._-]{2,39}$/.test(v.login.trim().toLowerCase())) return toast('Identifiant : 3 à 40 lettres sans accent, chiffres ou points.', true);
+    if (v.pw.length < 8) return toast('Mot de passe : 8 caractères minimum.', true);
+    const btn = $('#ns-ok'); btn.disabled = true; btn.textContent = 'Création…';
+    try {
+      const r = await admCall({ action: 'create_shop', name: v.name.trim(), shop_type: v.type, owner_name: v.owner.trim(), phone: v.phone.trim() || null,
+        login: v.login.trim().toLowerCase(), password: v.pw, trial_days: v.trial });
+      await adminHome(); adminAccess('✅ Boutique créée', r.login, v.pw, v.name.trim(), v.phone.trim());
+    } catch (e) { btn.disabled = false; btn.textContent = '✓ Créer la boutique'; toast(e.message, true); }
+  };
+}
+const JOUR = { shop_created: ['🏪', 'Boutique créée'], subscription_paid: ['💰', 'Paiement'], shop_suspended: ['⏸️', 'Suspendue'], shop_reactivated: ['▶️', 'Réactivée'],
+  owner_password_reset: ['🔑', 'Mot de passe changé'], shop_contact_updated: ['📞', 'Contact modifié'] };
+async function adminJournal() {
+  let l; try { l = await admRpc('admin_journal', { p_limit: 100 }); } catch (e) { return toast(e.message, true); }
+  admSheet(`<h2>📜 Journal</h2><div class="muted">Vos actions d'administration (rien ne peut être effacé).</div>
+    <div class="stack" style="gap:6px">${(l || []).map(a => { const [i, t] = JOUR[a.action] || ['•', a.action], dd = a.details || {};
+      const extra = a.action === 'subscription_paid' ? ` · ${fmtNum.format(dd.amount)} FCFA, ${dd.months} mois (reçu ${dd.receipt_no || '—'})` : dd.reason ? ' · ' + dd.reason : '';
+      return `<div class="arow"><span class="aic" aria-hidden="true">${i}</span><div style="min-width:0"><div style="font-size:14px"><b>${esc(t)}</b> · ${esc(a.shop_name || '')}${esc(extra)}</div>
+        <div class="muted" style="font-size:12px">${dt(a.created_at)}</div></div></div>`; }).join('') || '<p class="empty">Rien pour l\'instant.</p>'}</div>
+    <button class="btn ghost" id="cancel">Fermer</button>`);
+}
+function adminHelp() {
+  admSheet(`<h2>❓ Comment ça marche</h2>
+    ${[['＋', 'Nouvelle boutique : nom, métier, propriétaire, identifiant. Donnez-lui ensuite l\'identifiant et le mot de passe.'],
+       ['🟠', '« À relancer » : essai ou abonnement qui finit dans 7 jours (ou fini). Touchez la boutique → 💬 Rappel WhatsApp.'],
+       ['💰', 'Le client a payé : touchez la boutique → Enregistrer un paiement (1, 3 ou 12 mois). Envoyez le reçu.'],
+       ['🔴', 'Pas payé : 7 jours de grâce, puis lecture seule toute seule. Rien n\'est effacé.'],
+       ['⏸️', 'Suspendre : seulement en cas de problème (fraude…). Motif obligatoire.'],
+       ['🔐', 'Vous ne voyez jamais les ventes ni le stock des boutiques : c\'est leur confiance.']]
+      .map(([i, t]) => `<div class="card" style="display:flex;gap:12px;padding:12px"><span style="font-size:26px">${i}</span><span style="font-size:15px">${t}</span></div>`).join('')}
+    <button class="btn ghost" id="cancel">Fermer</button>`);
 }
 
 /* ===== Cloche des alertes (propriétaire) ===== */
