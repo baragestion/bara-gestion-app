@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-29g';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-29h';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1158,7 +1158,7 @@ function viewMore() {
     ${S.role === 'owner' ? T('team', '⚙️', 'Équipe et réglages', 'employés, droits, sécurité') : ''}
     <button class="htile" id="guide" style="min-height:120px"><span class="hic" aria-hidden="true" style="background:var(--accent-soft)">👋</span><span class="hl">Guide</span><span class="muted" style="font-size:12.5px;font-weight:400">comment ça marche</span></button>
   </div>`;
-  $('#guide').onclick = guideSheet;
+  $('#guide').onclick = () => guideSheet();
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
 }
 
@@ -3024,21 +3024,99 @@ function orderSheet() {
   };
 }
 
-// 👋 Petit guide : au premier lancement (boutique vide), et toujours depuis « Plus ».
-function guideSheet() {
+// 👋 Guide : les 4 étapes de base, puis chaque sujet en gros boutons (on touche, on lit les étapes).
+const GUIDE = [
+  { k: 'produits', ic: '📦', t: 'Ajouter mes produits', mgr: 1, s: [
+    'Touchez « Produits » en bas, puis « ＋ Nouveau produit ».',
+    '📋 « Choisir dans la liste » : touchez vos produits, puis tapez le prix et la quantité. Le plus rapide.',
+    '🎨 « Produit à variantes » : un produit en plusieurs tailles (Huile 1 L, 5 L, 20 L). Un prix par taille.',
+    '✍️ « Créer à la main » : si le produit n\'est pas dans la liste.',
+    'Choisissez le rayon, le type et la marque : tout se range tout seul.'] },
+  { k: 'cloth', ic: '👕', t: 'Vêtements et chaussures', mgr: 1, type: 'vetements', s: [
+    'Produits → ＋ Nouveau produit → 👕 « Nouveau vêtement ou chaussure ».',
+    'Touchez dans l\'ordre : rayon (Hommes…), type (Chaussures…), marque (Nike…).',
+    'Tapez le nom du modèle, touchez les tailles et les couleurs.',
+    'Tapez combien vous en avez pour chaque taille / couleur, puis le prix.',
+    '« Autre modèle » pour enchaîner sans tout retaper.'] },
+  { k: 'caisse', ic: '💰', t: 'La caisse', s: [
+    'Le matin : touchez « 💰 Fermée » en haut (ou « Ouvrir la caisse »).',
+    'Comptez l\'argent du tiroir et tapez le montant. La caisse devient verte « Ouverte ».',
+    'Une dépense (transport, repas…) : Caisse → 🧾 Dépense.',
+    'Le soir : Caisse → 🔒 Fermer la caisse. Comptez le tiroir : l\'application montre s\'il manque de l\'argent.'] },
+  { k: 'vendre', ic: '🛒', t: 'Vendre', s: [
+    'Touchez « Vendre » en bas. ⭐ Les plus vendus sont en haut.',
+    'Touchez un produit : il va dans le panier 🛒 (le chiffre en haut monte).',
+    'Touchez « Payer » en bas. Choisissez 💵 Espèces, 📱 Mobile ou 📒 Crédit.',
+    'Espèces : tapez l\'argent reçu, l\'application dit la monnaie à rendre.',
+    'Touchez « ✓ Valider la vente ». Puis « Facture » pour l\'envoyer par 💬 WhatsApp.'] },
+  { k: 'scan', ic: '📷', t: 'Scanner les codes-barres', s: [
+    'Dans Vendre, touchez 📷 à côté de « Chercher ».',
+    'Mettez le code-barres dans le cadre, à 15-20 cm. Le produit va tout seul dans le panier.',
+    'Image floue : reculez un peu le téléphone. Il fait sombre : touchez « 🔦 Lumière ».',
+    'Pour donner un code à un produit : Produits → le produit → ✏️ Modifier → 📷 scanner le code du fabricant.',
+    'Un produit sans code : imprimez une étiquette (voir « Étiquettes »).'] },
+  { k: 'etiq', ic: '🏷️', t: 'Étiquettes', mgr: 1, s: [
+    'Produits → 🏷️ Étiquettes.',
+    'Pour chaque produit, tapez combien d\'étiquettes (« 1 pour tous » si vous voulez).',
+    'Cochez « Afficher le prix » si vous voulez le prix dessus.',
+    'Touchez « Créer le PDF », imprimez sur une feuille A4, découpez.',
+    'Collez sur l\'article, sa boîte ou l\'étagère. Ensuite, vendez en scannant 📷.'] },
+  { k: 'arrivage', ic: '📥', t: 'Marchandise reçue', mgr: 1, s: [
+    'Un produit : Produits → le produit → « 📥 Arrivage ». Tapez la quantité reçue.',
+    'Plusieurs tailles d\'un coup : touchez le produit (ex. Jean slim) → 📦 « Arrivage : toutes les tailles ».',
+    'Le prix d\'achat est facultatif, mais il sert à calculer votre bénéfice.'] },
+  { k: 'imei', ic: '📱', t: 'Téléphones et IMEI', mgr: 1, type: 'telephones', s: [
+    'Produits → ＋ Nouveau produit → 📱 « Nouveau modèle » (marque, mémoires, prix).',
+    'Produits → 📥 Arrivage → scannez l\'IMEI de la boîte, choisissez la couleur et la garantie.',
+    'Beaucoup de boîtes : après la première, touchez « 📷 Continuer en rafale » et scannez les boîtes une à une.',
+    'Pas de code-barres lisible : Produits → 🏷️ Étiquettes → « ✍️ Créer des étiquettes IMEI ».',
+    'Vendre : scannez la boîte. La facture garde l\'IMEI et la garantie.',
+    'Retrouver un téléphone (garantie, vol) : Produits → 🔎 « Retrouver un appareil ».'] },
+  { k: 'commande', ic: '📝', t: 'Commander au fournisseur', mgr: 1, s: [
+    'Produits → « ⚠️ À recommander » : les produits presque finis.',
+    'Touchez « 📝 Bon de commande », changez les quantités si besoin.',
+    'Tapez le numéro WhatsApp du fournisseur, puis « 💬 Envoyer ».'] },
+  { k: 'clients', ic: '👥', t: 'Clients et crédit', s: [
+    'Touchez « Clients » en bas → « + Nouveau client » (nom et téléphone).',
+    'Vente à crédit : dans Payer, choisissez le client puis 📒 Crédit.',
+    'Quand le client rembourse : Clients → le client → « 💵 Il donne de l\'argent ».',
+    'Un client peut aussi laisser une avance : elle sert pour ses prochains achats.'] },
+  { k: 'devis', ic: '🧾', t: 'Faire un devis', s: [
+    'Remplissez le panier dans Vendre, puis Payer → « Faire un devis ».',
+    'Envoyez-le par WhatsApp au client.',
+    'Il accepte : Plus → Ventes et devis → Devis → le devis → « Transformer en vente ».'] },
+  { k: 'comptage', ic: '🔢', t: 'Compter le stock', mgr: 1, s: [
+    'Produits → 🔢 Comptage.',
+    'Tapez ce que vous voyez vraiment sur les étagères.',
+    'L\'application montre les écarts (ce qui manque). Le propriétaire valide.'] },
+  { k: 'horsligne', ic: '📴', t: 'Sans internet', s: [
+    'Vous pouvez vendre sans internet : les ventes sont gardées dans le téléphone.',
+    'Dès qu\'internet revient, elles partent toutes seules.',
+    'La caisse, les arrivages et les devis demandent internet.'] },
+  { k: 'bilan', ic: '📊', t: 'Bilan et équipe', own: 1, s: [
+    'Plus → 📊 Bilan : ventes, bénéfice, dépenses du jour, de la semaine, du mois.',
+    'La cloche 🔔 en haut : les alertes (argent qui manque, remise trop grande…).',
+    'Plus → ⚙️ Équipe : ajoutez vos vendeurs et choisissez ce qu\'ils ont le droit de faire.'] }];
+function guideSheet(k) {
   try { storage.setItem('bg_guide_' + S.shop.id, '1'); } catch (e) {}
-  const st = [['📦', 'Ajoutez vos produits', 'Produits → ＋ Nouveau produit. Le nom, le prix, la quantité.'],
-    ['💰', 'Ouvrez la caisse', 'Chaque matin : comptez l\'argent du tiroir.'],
-    ['🛒', 'Vendez', 'Vendre → touchez les produits → Payer.'],
-    ['📊', 'Le soir', 'Fermez la caisse. Regardez le Bilan.']];
+  const list = GUIDE.filter(g => (!g.type || g.type === S.shop.type) && (!g.mgr || isManager()) && (!g.own || S.role === 'owner')
+    && (g.k !== 'imei' || canTrack()));
+  const g = k && list.find(x => x.k === k);
+  const empty = isManager() && !S.products.length;
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Guide">
-    <h2>👋 Bienvenue</h2><div class="muted">4 étapes, c'est tout.</div>
-    ${st.map((x, i) => `<div class="card" style="display:flex;gap:12px;align-items:center;padding:12px"><span style="font-size:34px" aria-hidden="true">${x[0]}</span>
-      <div><b style="font-size:17px">${i + 1}. ${x[1]}</b><br><span class="muted" style="font-size:13.5px">${x[2]}</span></div></div>`).join('')}
-    ${isManager() && !S.products.length ? '<button class="btn huge" id="gd-go">📦 Ajouter mon premier produit</button>' : ''}
-    <button class="btn ghost" id="cancel">${isManager() && !S.products.length ? 'Plus tard' : 'Compris ✓'}</button></div></div>`;
+    ${g ? `<h2>${g.ic} ${esc(g.t)}</h2>
+      ${g.s.map((x, i) => `<div class="card" style="display:flex;gap:12px;align-items:flex-start;padding:12px"><b style="flex:0 0 auto;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:var(--accent-ink);font:800 15px var(--f-display)">${i + 1}</b>
+        <span style="font-size:15.5px;line-height:1.4">${esc(x)}</span></div>`).join('')}
+      <button class="btn huge" id="gd-back">‹ Autres sujets</button>`
+    : `<h2>👋 Comment ça marche ?</h2><div class="muted">Touchez un sujet.</div>
+      <div class="htiles">${list.map(x => `<button class="htile" data-gk="${x.k}" style="min-height:100px"><span class="hic" aria-hidden="true" style="background:var(--accent-soft);font-size:28px">${x.ic}</span><span class="hl" style="font-size:15px">${esc(x.t)}</span></button>`).join('')}</div>
+      ${empty ? '<button class="btn huge" id="gd-go">📦 Ajouter mon premier produit</button>' : ''}`}
+    <button class="btn ghost" id="cancel">${empty && !g ? 'Plus tard' : 'Fermer'}</button></div></div>`;
   $('#cancel').onclick = closeSheet;
-  const g = $('#gd-go'); if (g) g.onclick = () => { closeSheet(); S.tab = 'products'; draw(); newProductChoice(); };
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  document.querySelectorAll('[data-gk]').forEach(b => b.onclick = () => { guideSheet(b.dataset.gk); $('.sheet').scrollTop = 0; });
+  const bk = $('#gd-back'); if (bk) bk.onclick = () => guideSheet();
+  const go = $('#gd-go'); if (go) go.onclick = () => { closeSheet(); S.tab = 'products'; draw(); newProductChoice(); };
 }
 
 // Fiche d'un produit : grosses actions (arrivage, modifier, perte).
