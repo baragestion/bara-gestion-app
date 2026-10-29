@@ -255,7 +255,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-29a';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-29b';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -2468,23 +2468,57 @@ function viewCatalog() {
   const nx = $('#cat-next'); if (nx) nx.onclick = () => { S.catMode = 'prices'; window.scrollTo(0, 0); viewProducts(); };
 }
 
-// Étape 2 : pour chaque produit choisi, prix de vente, prix d'achat, quantité.
+// Tailles et couleurs (vêtements) ou variantes (autres métiers) proposées pour un produit du catalogue.
+const COLORS_ALL = ['Noir', 'Blanc', 'Bleu', 'Rouge', 'Vert', 'Jaune', 'Rose', 'Gris', 'Marron', 'Beige'];
+function dimsFor(x) {
+  if (S.shop.type === 'vetements') {
+    const shoe = /chaussure|sandale|basket|tapette/i.test(x.name);
+    const sizes = shoe ? (x.category === 'Enfants' ? ['24', '26', '28', '30', '32', '34'] : ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'])
+      : /pagne|wax|faso|tissu|foulard|sac|ceinture|casquette/i.test(x.name) ? []
+      : x.category === 'Enfants' || /enfant|scolaire/i.test(x.name) ? ['2 ans', '4 ans', '6 ans', '8 ans', '10 ans', '12 ans'] : ['S', 'M', 'L', 'XL', 'XXL'];
+    return [...(sizes.length ? [{ key: 'sizes', label: 'Tailles', sug: sizes }] : []), { key: 'colors', label: 'Couleurs', sug: COLORS_ALL }];
+  }
+  return [{ key: 'sizes', label: 'Variantes', sug: VAR_SUG[S.shop.type] || [] }];
+}
+// Toutes les combinaisons choisies : « M · Noir », « M · Bleu », « L · Noir »…
+const combos = x => { const a = x.sizes || [], c = x.colors || [];
+  return a.length && c.length ? a.flatMap(s1 => c.map(c1 => s1 + ' · ' + c1)) : [...a, ...c]; };
+
+// Étape 2 : pour chaque produit choisi, prix de vente, prix d'achat, quantité (ou quantité par taille / couleur).
 function viewCatalogPrices() {
   const rows = [...S.catPick.values()];
   const big = 'style="font-size:18px;height:50px;font-weight:700"';
+  const clothes = S.shop.type === 'vetements';
   $('#view').innerHTML = `<div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="cat-back" style="flex:0 0 auto">‹ Liste</button>
       <h2 style="flex:1 1 auto">Vos prix (${rows.length})</h2></div>
-    <p class="muted" style="margin:0;font-size:13.5px">Pour chaque produit : votre prix de vente et combien vous en avez. Le prix d'achat est facultatif (il sert à calculer votre gain).</p>
-    ${rows.map((x, i) => `<section class="card stack" style="gap:10px" data-row="${i}">
-      <div style="display:flex;gap:10px;align-items:center">${prodIcon(x, 44)}<div style="min-width:0;flex:1 1 auto"><b>${esc(x.name)}</b><div class="muted" style="font-size:12.5px">${esc(unitAu(x.unit))}</div></div>
+    <p class="muted" style="margin:0;font-size:13.5px">Pour chaque produit : votre prix de vente et combien vous en avez.${clothes ? ' Touchez « Tailles / couleurs » pour noter la quantité de chaque taille et couleur.' : ''} Le prix d'achat est facultatif.</p>
+    ${rows.map((x, i) => { const cb = combos(x);
+      return `<section class="card stack" style="gap:10px" data-row="${i}">
+      <div style="display:flex;gap:10px;align-items:center">${prodIcon(x, 44)}<div style="min-width:0;flex:1 1 auto"><b>${esc(x.name)}</b><div class="muted" style="font-size:12.5px">${esc(unitAu(x.unit))} · ${esc(x.category)}</div></div>
         <button class="btn ghost small" data-rm="${i}" aria-label="Retirer ${esc(x.name)}" style="flex:0 0 auto">✕</button></div>
-      <div class="row"><label>Prix de vente<input data-f="sell" data-i="${i}" type="number" inputmode="numeric" min="0" step="1" value="${esc(x.sell)}" ${big}></label>
+      <div class="row"><label>Prix de vente${cb.length ? ' (chacun)' : ''}<input data-f="sell" data-i="${i}" type="number" inputmode="numeric" min="0" step="1" value="${esc(x.sell)}" ${big}></label>
         <label>Prix d'achat (facultatif)<input data-f="buy" data-i="${i}" type="number" inputmode="numeric" min="0" step="1" value="${esc(x.buy)}" placeholder="si vous savez" ${big}></label></div>
-      <label>Quantité en stock (${esc(UNITS[x.unit])})<input data-f="qty" data-i="${i}" type="number" inputmode="decimal" min="0" step="${WHOLE.includes(x.unit) ? 1 : 'any'}" value="${esc(x.qty)}" placeholder="0" ${big}></label>
-      <div class="row-msg" id="msg-${i}"></div></section>`).join('')}
+      ${x.var ? dimsFor(x).map(d => `<div class="muted" style="font-size:13px;font-weight:600">${esc(d.label)}</div>
+        <div class="chips" style="flex-wrap:wrap">${[...new Set([...d.sug, ...(x[d.key] || [])])].map(v => `<button type="button" data-dim="${i}" data-k="${d.key}" data-v="${esc(v)}" aria-pressed="${(x[d.key] || []).includes(v)}">${d.key === 'colors' ? dot(v) + ' ' : ''}${esc(v)}</button>`).join('')}</div>
+        <div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label style="flex:1 1 auto">Autre ${d.key === 'colors' ? 'couleur' : d.label === 'Tailles' ? 'taille' : 'variante'}<input data-dimin="${i}" data-k="${d.key}" maxlength="30"></label>
+          <button class="btn ghost small" type="button" data-dimadd="${i}" data-k="${d.key}" style="flex:0 0 auto;margin-bottom:2px">＋</button></div>`).join('') : ''}
+      ${cb.length ? `<div class="muted" style="font-size:13px;font-weight:600">Combien de chaque ? (${esc(UNITS[x.unit])})</div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${cb.map(l => `<label style="font-size:13.5px">${esc(l)}<input data-vq="${i}" data-l="${esc(l)}" type="number" inputmode="numeric" min="0" step="1" value="${esc((x.vq || {})[l] || '')}" placeholder="0" style="font-size:18px;height:46px;font-weight:700"></label>`).join('')}</div>`
+      : `<label>Quantité en stock (${esc(UNITS[x.unit])})<input data-f="qty" data-i="${i}" type="number" inputmode="decimal" min="0" step="${WHOLE.includes(x.unit) ? 1 : 'any'}" value="${esc(x.qty)}" placeholder="0" ${big}></label>`}
+      ${x.var ? '' : `<button class="btn ghost small" type="button" data-var="${i}">${clothes ? '📏 Tailles / couleurs' : '🎨 Variantes (tailles, modèles…)'}</button>`}
+      <div class="row-msg" id="msg-${i}"></div></section>`; }).join('')}
     <button class="btn huge" id="cat-save" ${canWrite() ? '' : 'disabled'}>✓ Enregistrer ${rows.length} produit${rows.length > 1 ? 's' : ''}</button>`;
+  const keepY = () => { const y = window.scrollY; viewCatalogPrices(); window.scrollTo(0, y); };
   $('#cat-back').onclick = () => { S.catMode = 'pick'; viewProducts(); };
   document.querySelectorAll('[data-f]').forEach(inp => inp.oninput = () => { rows[inp.dataset.i][inp.dataset.f] = inp.value; S.catWarnOk = false; });
+  document.querySelectorAll('[data-vq]').forEach(inp => inp.oninput = () => { const x = rows[inp.dataset.vq]; (x.vq = x.vq || {})[inp.dataset.l] = inp.value; });
+  document.querySelectorAll('[data-var]').forEach(b => b.onclick = () => { rows[b.dataset.var].var = true; keepY(); });
+  document.querySelectorAll('[data-dim]').forEach(b => b.onclick = () => { const x = rows[b.dataset.dim], k = b.dataset.k, v = b.dataset.v;
+    x[k] = (x[k] || []).includes(v) ? x[k].filter(y => y !== v) : [...(x[k] || []), v]; keepY(); });
+  document.querySelectorAll('[data-dimadd]').forEach(b => b.onclick = () => { const i = b.dataset.dimadd, k = b.dataset.k, x = rows[i];
+    const v = document.querySelector(`[data-dimin="${i}"][data-k="${k}"]`).value.trim().replace(/\s*·\s*/g, ' ');
+    if (!v) return toast('Tapez la valeur.', true);
+    if (!(x[k] || []).includes(v)) x[k] = [...(x[k] || []), v]; keepY(); });
   document.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { S.catPick.delete(nameKey(rows[b.dataset.rm].name));
     if (!S.catPick.size) { S.catMode = 'pick'; return viewProducts(); } viewCatalogPrices(); });
   $('#cat-save').onclick = saveCatalog;
@@ -2494,13 +2528,16 @@ async function saveCatalog() {
   const rows = [...S.catPick.values()], btn = $('#cat-save');
   let bad = false, warn = false;
   rows.forEach((x, i) => {
-    const m = $('#msg-' + i), sell = Number(x.sell), buy = Number(x.buy), q = x.qty === '' ? 0 : Number(x.qty);
+    const m = $('#msg-' + i), sell = Number(x.sell), buy = Number(x.buy), q = x.qty === '' || x.qty == null ? 0 : Number(x.qty), cb = combos(x);
     let t = '';
     if (x.sell === '' || !(sell > 0)) t = 'Tapez le prix de vente.';
-    else if (x.buy !== '' && !(buy >= 0)) t = 'Prix d\'achat invalide.';
+    else if (x.buy !== '' && x.buy != null && !(buy >= 0)) t = 'Prix d\'achat invalide.';
+    else if (cb.length) { const badq = cb.find(l => { const v = Number((x.vq || {})[l] || 0); return !(v >= 0) || (WHOLE.includes(x.unit) && v !== Math.trunc(v)); });
+      if (badq) t = 'Quantité invalide : ' + badq; }
     else if (!(q >= 0) || (WHOLE.includes(x.unit) && q !== Math.trunc(q))) t = 'Quantité invalide' + (WHOLE.includes(x.unit) ? ' (nombre entier).' : '.');
+    if (!t && cb.length && cb.some(l => S.products.some(p => nameKey(p.name) === nameKey(x.name + ' · ' + l)))) t = 'Une de ces tailles / couleurs existe déjà.';
     if (t) bad = true;
-    const loss = !t && x.buy !== '' && sell < buy;
+    const loss = !t && x.buy !== '' && x.buy != null && sell < buy;
     if (loss) warn = true;
     m.innerHTML = t ? `<div class="banner bad" style="margin:0">${esc(t)}</div>` : loss ? `<div class="banner" style="margin:0">Attention : vente à perte (vente ${esc(money(sell))} &lt; achat ${esc(money(buy))}).</div>` : '';
   });
@@ -2510,9 +2547,15 @@ async function saveCatalog() {
   let ok = 0;
   for (const [i, x] of rows.entries()) {
     btn.textContent = `Enregistrement ${i + 1} / ${rows.length}…`;
-    const { error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: x.name, p_category: x.category, p_unit: x.unit,
-      p_buy_price: x.buy === '' ? null : Math.round(Number(x.buy)), p_sell_price: Math.round(Number(x.sell)), p_initial_qty: x.qty === '' ? 0 : Number(x.qty), p_alert: 0, p_barcode: null });
-    if (error) { $('#msg-' + i).innerHTML = `<div class="banner bad" style="margin:0">${esc(cleanErr(error))}</div>`; continue; }
+    const cb = combos(x), list = cb.length ? cb.map(l => ({ name: x.name + ' · ' + l, qty: Number((x.vq || {})[l] || 0) }))
+      : [{ name: x.name, qty: x.qty === '' || x.qty == null ? 0 : Number(x.qty) }];
+    let fail = null;
+    for (const it of list) {
+      const { error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: it.name, p_category: x.category, p_unit: x.unit,
+        p_buy_price: x.buy === '' || x.buy == null ? null : Math.round(Number(x.buy)), p_sell_price: Math.round(Number(x.sell)), p_initial_qty: it.qty, p_alert: 0, p_barcode: null });
+      if (error) { fail = it.name + ' : ' + cleanErr(error); break; }
+    }
+    if (fail) { $('#msg-' + i).innerHTML = `<div class="banner bad" style="margin:0">${esc(fail)}</div>`; continue; }
     S.catPick.delete(nameKey(x.name)); ok++;
   }
   await loadProducts(); S.summary = null;
