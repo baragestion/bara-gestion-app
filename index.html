@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-29e';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-29f';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1343,15 +1343,52 @@ const KIND_BY = { vetements: {
   Hommes: ['Pantalons', 'Chemises', 'T-shirts', 'Chaussures', 'Costumes', 'Boubous', 'Sous-vêtements', 'Accessoires'],
   Femmes: ['Robes', 'Jupes', 'Pantalons', 'Hauts', 'Chaussures', 'Sacs', 'Ensembles', 'Accessoires'],
   Enfants: ['Habits', 'Chaussures', 'Uniformes', 'Accessoires'],
-  Pagnes: ['Wax', 'Faso Dan Fani', 'Imprimés'] } };
+  Pagnes: ['Wax', 'Faso Dan Fani', 'Imprimés'] },
+  alimentation: {
+    'Céréales': ['Riz', 'Maïs', 'Mil', 'Sorgho', 'Farine', 'Pâtes', 'Haricot'],
+    'Épicerie': ['Sucre', 'Sel', 'Bouillon', 'Café et thé', 'Lait en poudre', 'Biscuits', 'Bonbons'],
+    'Huiles': ['Huile', 'Beurre', 'Margarine'],
+    'Lait et boissons': ['Lait', 'Eau', 'Sucreries', 'Jus'],
+    'Conserves': ['Tomate', 'Poisson', 'Légumes'],
+    'Frais': ['Œufs', 'Pain', 'Légumes', 'Fruits', 'Viande', 'Poisson'],
+    'Entretien': ['Savon', 'Lessive', 'Javel', 'Insecticide', 'Allumettes'] },
+  cosmetiques: {
+    'Corps': ['Savons', 'Crèmes et laits', 'Huiles', 'Parfums', 'Déodorants'],
+    'Cheveux': ['Shampoings', 'Défrisants', 'Mèches et perruques', 'Gels', 'Peignes'],
+    'Maquillage': ['Lèvres', 'Ongles', 'Teint', 'Yeux'],
+    'Hygiène': ['Dents', 'Bébé', 'Femme', 'Rasage'] },
+  pieces: {
+    'Moto': ['Pneus', 'Freins', 'Chaînes', 'Moteur', 'Électricité', 'Carrosserie'],
+    'Vélo': ['Pneus', 'Freins', 'Chaînes', 'Autres pièces'],
+    'Huiles': ['Huile moteur', 'Huile 2 temps', 'Graisse'] } };
 const KIND_IC = { Pantalons: '👖', Chemises: '👔', 'T-shirts': '👕', Chaussures: '👟', Costumes: '🤵', Boubous: '🥻', 'Sous-vêtements': '🩲', Accessoires: '🧢',
-  Robes: '👗', Jupes: '👗', Hauts: '👚', Sacs: '👜', Ensembles: '👘', Habits: '🧒', Uniformes: '🎒', Wax: '🧵', 'Faso Dan Fani': '🧵', 'Imprimés': '🧵', Autres: '📦' };
-const KIND_RE = [[/chaussure|basket|sandale|tapette|escarpin|mocassin/i, 'Chaussures'], [/pantalon|jean|short/i, 'Pantalons'], [/chemise/i, 'Chemises'],
+  Robes: '👗', Jupes: '👗', Hauts: '👚', Sacs: '👜', Ensembles: '👘', Habits: '🧒', Uniformes: '🎒', Wax: '🧵', 'Faso Dan Fani': '🧵', 'Imprimés': '🧵', Autres: '📦',
+  Riz: '🍚', 'Maïs': '🌽', Mil: '🌾', Sorgho: '🌾', Farine: '🌾', 'Pâtes': '🍝', Haricot: '🫘', Sucre: '🧂', Sel: '🧂', Bouillon: '🧂', 'Café et thé': '☕',
+  'Lait en poudre': '🥛', Biscuits: '🍪', Bonbons: '🍬', Huile: '🫗', Beurre: '🧈', Margarine: '🧈', Lait: '🥛', Eau: '💧', Sucreries: '🥤', Jus: '🧃',
+  Tomate: '🥫', Poisson: '🐟', 'Légumes': '🥬', 'Œufs': '🥚', Pain: '🍞', Fruits: '🍌', Viande: '🥩', Savon: '🧼', Lessive: '🧺', Javel: '🧴', Insecticide: '🦟', Allumettes: '🔥',
+  Savons: '🧼', 'Crèmes et laits': '🧴', Huiles: '🫗', Parfums: '🌸', 'Déodorants': '🧴', Shampoings: '🧴', 'Défrisants': '🧴', 'Mèches et perruques': '💇', Gels: '🧴', Peignes: '🪮',
+  'Lèvres': '💄', Ongles: '💅', Teint: '🪞', Yeux: '👁️', Dents: '🪥', 'Bébé': '👶', Femme: '🌸', Rasage: '🪒',
+  Pneus: '🛞', Freins: '🛑', 'Chaînes': '⛓️', Moteur: '⚙️', 'Électricité': '🔌', Carrosserie: '🏍️', 'Autres pièces': '🔩', 'Huile moteur': '🛢️', 'Huile 2 temps': '🛢️', Graisse: '🛢️' };
+const KIND_RE_V = [[/chaussure|basket|sandale|tapette|escarpin|mocassin/i, 'Chaussures'], [/pantalon|jean|short/i, 'Pantalons'], [/chemise/i, 'Chemises'],
   [/t-?shirt|polo|maillot|d[ée]bardeur/i, 'T-shirts'], [/complet|costume|veste|blazer/i, 'Costumes'], [/boubou|bazin/i, 'Boubous'], [/robe/i, 'Robes'], [/jupe/i, 'Jupes'],
   [/ensemble/i, 'Ensembles'], [/sac/i, 'Sacs'], [/foulard|casquette|ceinture|chaussette|chapeau|bonnet/i, 'Accessoires'], [/sous-?v[eê]t|slip|boxer|soutien/i, 'Sous-vêtements'],
   [/uniforme/i, 'Uniformes'], [/wax/i, 'Wax'], [/faso dan/i, 'Faso Dan Fani'], [/pagne|tissu/i, 'Imprimés'], [/habit/i, 'Habits'], [/pull|haut|blouse|top|chemisier/i, 'Hauts']];
 // Type d'un produit : celui enregistré, sinon deviné d'après le nom (les produits déjà créés sont rangés tout seuls).
-const kindOf = p => p.kind || ((KIND_RE.find(([re]) => re.test(p.name || '')) || [])[1]) || 'Autres';
+// Par métier (un « sac de riz » n'est pas un « Sac » à main).
+const KIND_RE_BY = { vetements: KIND_RE_V,
+  alimentation: [[/riz/i, 'Riz'], [/ma[iï]s/i, 'Maïs'], [/\bmil\b/i, 'Mil'], [/sorgho/i, 'Sorgho'], [/farine/i, 'Farine'], [/p[âa]te|spaghetti|macaroni/i, 'Pâtes'],
+    [/haricot|niébé|niebe/i, 'Haricot'], [/sucre\b|sucre en/i, 'Sucre'], [/\bsel\b/i, 'Sel'], [/bouillon|maggi|cube|jumbo/i, 'Bouillon'], [/caf[ée]|th[ée]\b|lipton|nescaf/i, 'Café et thé'],
+    [/lait en poudre|nido|vitalait/i, 'Lait en poudre'], [/biscuit/i, 'Biscuits'], [/bonbon/i, 'Bonbons'], [/huile/i, 'Huile'], [/beurre/i, 'Beurre'], [/margarine/i, 'Margarine'],
+    [/lait/i, 'Lait'], [/\beau\b/i, 'Eau'], [/sucrerie|coca|fanta|soda|sprite|boisson/i, 'Sucreries'], [/\bjus/i, 'Jus'], [/tomate/i, 'Tomate'], [/sardine|thon|poisson|maquereau/i, 'Poisson'],
+    [/[œo]euf/i, 'Œufs'], [/\bpain/i, 'Pain'], [/savon/i, 'Savon'], [/lessive|omo|d[ée]tergent/i, 'Lessive'], [/javel/i, 'Javel'], [/insecticide|moustique|rambo/i, 'Insecticide'], [/allumette|briquet/i, 'Allumettes']],
+  cosmetiques: [[/savon/i, 'Savons'], [/cr[èe]me|lait de corps|pommade|vaseline|karit/i, 'Crèmes et laits'], [/huile/i, 'Huiles'], [/parfum/i, 'Parfums'], [/d[ée]odorant/i, 'Déodorants'],
+    [/shampo/i, 'Shampoings'], [/d[ée]frisant/i, 'Défrisants'], [/m[èe]che|perruque/i, 'Mèches et perruques'], [/\bgel/i, 'Gels'], [/peigne|brosse [àa] cheveux/i, 'Peignes'],
+    [/rouge [àa] l|l[èe]vre/i, 'Lèvres'], [/vernis|ongle/i, 'Ongles'], [/poudre|fond de teint/i, 'Teint'], [/crayon|mascara|yeux/i, 'Yeux'], [/dent/i, 'Dents'], [/couche|b[ée]b[ée]/i, 'Bébé'],
+    [/serviette|hygi[ée]nique/i, 'Femme'], [/lame|rasoir/i, 'Rasage']],
+  pieces: [[/pneu|chambre [àa] air|rustine/i, 'Pneus'], [/frein|plaquette|m[âa]choire/i, 'Freins'], [/cha[îi]ne|pignon/i, 'Chaînes'], [/huile moteur|huile 4/i, 'Huile moteur'],
+    [/2 temps/i, 'Huile 2 temps'], [/graisse/i, 'Graisse'], [/bougie|piston|filtre|carbu|segment|embrayage|roulement/i, 'Moteur'], [/batterie|ampoule|phare|c[âa]ble|fil/i, 'Électricité'],
+    [/r[ée]tro|selle|garde|poign[ée]e|levier|carross/i, 'Carrosserie']] };
+const kindOf = p => p.kind || (((KIND_RE_BY[S.shop && S.shop.type] || []).find(([re]) => re.test(p.name || '')) || [])[1]) || 'Autres';
 // Marques connues de la boutique (son « catalogue de marques »), plus quelques marques courantes du métier.
 const BRAND_SUG = { vetements: ['Nike', 'Adidas', 'Puma', 'Zara', "Levi's", 'H&M', 'Lacoste', 'Sans marque'], telephones: ['Samsung', 'Apple', 'Tecno', 'Itel', 'Infinix', 'Xiaomi'],
   cosmetiques: ['Nivea', 'Dove', 'Vaseline', "L'Oréal", 'Garnier'], pieces: ['Yamaha', 'Honda', 'Haojue', 'Sanili', 'Bajaj'], alimentation: ['Nestlé', 'Dangote', 'Jumbo', 'Maggi'], materiaux: ['Cimaf', 'Diamond', 'Sopal'] };
@@ -2566,41 +2603,46 @@ const clothName = v => [v.brand && v.brand !== 'Sans marque' ? v.brand : '', v.m
 const VAR_SUG = {
   telephones: ['iPhone 15', 'iPhone 14', 'iPhone 13', 'Samsung A15', 'Samsung A05', 'Tecno Spark 20', 'Infinix Hot 40', 'Type-C', 'Lightning', 'Micro-USB', '20 W', '33 W', 'Noir', 'Blanc'],
   vetements: ['S', 'M', 'L', 'XL', 'XXL', '38', '39', '40', '41', '42', '43', '44', 'Noir', 'Blanc', 'Bleu', 'Rouge'],
-  alimentation: ['1 L', '5 L', '20 L', '1 kg', '5 kg', '25 kg', '50 kg', 'Petit', 'Grand'],
+  alimentation: ['1 kg', '5 kg', '25 kg', '50 kg', '1 L', '5 L', '20 L', 'Sachet', 'Boîte', 'Paquet', 'Carton', 'Petit', 'Grand'],
   cosmetiques: ['Petit', 'Moyen', 'Grand', '100 ml', '250 ml', '500 ml'],
   materiaux: ['6 mm', '8 mm', '10 mm', '12 mm', '14 mm', '1 L', '4 L', '20 L', 'Blanc', 'Gris'],
   pieces: ['Avant', 'Arrière', 'Yamaha', 'Honda', 'Haojue', 'Sanili', 'Petit', 'Grand']
 };
 function variantForm(v) {
-  v = { fam: '', unit: 'piece', cat: S.shop.type === 'telephones' ? 'Accessoires' : '', vars: [], same: true, px: {}, sell: '', buy: '', ...v };
+  v = { fam: '', unit: 'piece', cat: S.shop.type === 'telephones' ? 'Accessoires' : '', kind: '', brand: '', vars: [], same: false, px: {}, sell: '', buy: '', ...v };
   const big = 'style="font-size:18px;height:50px;font-weight:700"';
   const sug = [...new Set([...(VAR_SUG[S.shop.type] || []), ...v.vars])];
   const cats = [...new Set(S.products.map(x => x.category).filter(Boolean))];
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sheet" role="dialog" aria-label="Produit à variantes">
     <h2>🎨 Produit à variantes</h2>
+    ${rayonField('vf-cat', v.cat || guessRayon(v.fam))}
+    ${kindField('vf-kind', v.cat, v.kind)}
+    ${brandField('vf-brand', v.brand)}
     <label>Nom du produit<input id="vf-fam" value="${esc(v.fam)}" maxlength="80" placeholder="ex. ${S.shop.type === 'telephones' ? 'Coque' : S.shop.type === 'vetements' ? 'Chaussures homme' : 'Huile'}" ${big}></label>
     <div class="muted" style="font-size:13px;font-weight:600">Variantes : touchez-les, ou tapez-en une autre</div>
     <div class="chips" style="flex-wrap:wrap">${sug.map(x => `<button type="button" data-vs="${esc(x)}" aria-pressed="${v.vars.includes(x)}">${esc(x)}</button>`).join('')}</div>
-    <div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label style="flex:1 1 auto">Autre variante<input id="vf-new" maxlength="30" placeholder="ex. iPhone 12"></label>
+    <div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label style="flex:1 1 auto">Autre variante<input id="vf-new" maxlength="30" placeholder="ex. ${S.shop.type === 'telephones' ? 'iPhone 12' : S.shop.type === 'alimentation' ? '10 kg' : S.shop.type === 'vetements' ? 'XL' : 'Moyen'}"></label>
       <button class="btn ghost small" type="button" id="vf-add" style="flex:0 0 auto;margin-bottom:2px">＋ Ajouter</button></div>
     <div class="muted" style="font-size:13px;font-weight:500">Vendu au (à la)</div>
     <div class="chips" style="flex-wrap:wrap">${Object.entries(UNITS).map(([k, l]) => `<button type="button" data-vu="${k}" aria-pressed="${v.unit === k}">${l}</button>`).join('')}</div>
-    <div style="display:flex;align-items:center;gap:10px"><input id="vf-same" type="checkbox" ${v.same ? 'checked' : ''} style="width:22px;height:22px;flex:0 0 auto;margin:0"><label for="vf-same" style="font-size:14px;color:var(--fg);display:inline">Même prix pour toutes les variantes</label></div>
-    ${v.same ? `<div class="row"><label>Prix de vente<input id="vf-sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.sell)}" ${big}></label>
+    <div style="display:${v.vars.length > 1 ? 'flex' : 'none'};align-items:center;gap:10px"><input id="vf-same" type="checkbox" ${v.same ? 'checked' : ''} style="width:22px;height:22px;flex:0 0 auto;margin:0"><label for="vf-same" style="font-size:14px;color:var(--fg);display:inline">Même prix pour toutes les variantes</label></div>
+    ${v.same && v.vars.length > 1 ? `<div class="row"><label>Prix de vente<input id="vf-sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.sell)}" ${big}></label>
       <label>Prix d'achat (facultatif)<input id="vf-buy" type="number" inputmode="numeric" min="0" step="1" value="${esc(v.buy)}" ${big}></label></div>` : ''}
     <div class="stack" style="gap:10px">${v.vars.map(x => { const q = v.px[x] || {};
       return `<section class="card stack" style="gap:8px;padding:12px"><div style="display:flex;align-items:center;gap:8px"><b style="flex:1 1 auto">${esc(v.fam || '…')} · ${esc(x)}</b>
         <button class="btn ghost small" type="button" data-vx="${esc(x)}" aria-label="Retirer ${esc(x)}" style="flex:0 0 auto">✕</button></div>
-        ${v.same ? '' : `<div class="row"><label>Prix de vente<input data-vp="${esc(x)}" data-f="sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(q.sell || '')}" ${big}></label>
+        ${v.same && v.vars.length > 1 ? '' : `<div class="row"><label>Prix de vente<input data-vp="${esc(x)}" data-f="sell" type="number" inputmode="numeric" min="0" step="1" value="${esc(q.sell || '')}" ${big}></label>
           <label>Prix d'achat (facultatif)<input data-vp="${esc(x)}" data-f="buy" type="number" inputmode="numeric" min="0" step="1" value="${esc(q.buy || '')}" ${big}></label></div>`}
         <label>Quantité en stock<input data-vp="${esc(x)}" data-f="qty" type="number" inputmode="decimal" min="0" step="any" value="${esc(q.qty || '')}" placeholder="0" ${big}></label></section>`; }).join('')
       || '<p class="muted" style="margin:0">Aucune variante choisie.</p>'}</div>
-    ${rayonField('vf-cat', v.cat || guessRayon(v.fam))}
     <button class="btn huge" type="submit" ${canWrite() ? '' : 'disabled'}>✓ Enregistrer ${v.vars.length ? v.vars.length + ' variante' + (v.vars.length > 1 ? 's' : '') : ''}</button>
     <button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
-  bindRayon('vf-cat');
+  bindRayon('vf-cat'); bindChips('vf-kind'); bindChips('vf-brand');
+  // Le rayon change : les types proposés changent (Céréales -> Riz, Maïs… ; Huiles -> Huile, Beurre…).
+  const reKind = () => { const w = $('#vf-kind-wrap'); if (!w) return; const cur = $('#vf-kind').value; w.outerHTML = kindField('vf-kind', $('#vf-cat').value.trim(), cur); bindChips('vf-kind'); };
+  $('#vf-cat').addEventListener('input', reKind);
   $('#vf-fam').addEventListener('change', () => { if (!$('#vf-cat').value.trim()) { const g = guessRayon($('#vf-fam').value); if (g) { $('#vf-cat').value = g; $('#vf-cat').dispatchEvent(new Event('input')); } } });
-  const read = () => { v.fam = $('#vf-fam').value.trim(); v.cat = $('#vf-cat').value.trim();
+  const read = () => { v.fam = $('#vf-fam').value.trim(); v.cat = $('#vf-cat').value.trim(); v.kind = $('#vf-kind').value.trim(); v.brand = $('#vf-brand').value.trim();
     if ($('#vf-sell')) { v.sell = $('#vf-sell').value; v.buy = $('#vf-buy').value; } };
   document.querySelectorAll('[data-vp]').forEach(i => i.oninput = () => { (v.px[i.dataset.vp] = v.px[i.dataset.vp] || {})[i.dataset.f] = i.value; });
   document.querySelectorAll('[data-vs]').forEach(b => b.onclick = () => { read(); const x = b.dataset.vs;
@@ -2618,12 +2660,13 @@ function variantForm(v) {
   $('#sheet').onsubmit = async ev => {
     ev.preventDefault(); read();
     if (!v.fam) return toast('Tapez le nom du produit.', true);
-    if (v.vars.length < 2) return toast('Choisissez au moins 2 variantes.', true);
+    if (!v.vars.length) return toast('Choisissez au moins une variante (ex. 25 kg).', true);
     const fam = v.fam.replace(/\s*·\s*/g, ' ');
-    const rows = v.vars.map(x => { const q = v.px[x] || {}, s0 = v.same ? v.sell : q.sell, b0 = v.same ? v.buy : q.buy;
+    const same = v.same && v.vars.length > 1;
+    const rows = v.vars.map(x => { const q = v.px[x] || {}, s0 = same ? v.sell : q.sell, b0 = same ? v.buy : q.buy;
       return { name: fam + ' · ' + x, sellRaw: s0, sell: Math.round(Number(s0)), buy: b0 === '' || b0 == null ? null : Math.round(Number(b0)), qty: q.qty === '' || q.qty == null ? 0 : Number(q.qty) }; });
     const bad = rows.find(r => r.sellRaw === '' || r.sellRaw == null || !(r.sell > 0));
-    if (bad) return toast('Tapez le prix de vente' + (v.same ? '.' : ' : ' + bad.name), true);
+    if (bad) return toast('Tapez le prix de vente' + (same ? '.' : ' : ' + bad.name), true);
     const badQ = rows.find(r => !(r.qty >= 0) || (WHOLE.includes(v.unit) && r.qty !== Math.trunc(r.qty)));
     if (badQ) return toast('Quantité invalide : ' + badQ.name + (WHOLE.includes(v.unit) ? ' (nombre entier)' : ''), true);
     const ex = rows.filter(r => S.products.some(p => nameKey(p.name) === nameKey(r.name)));
@@ -2631,13 +2674,17 @@ function variantForm(v) {
     const btn = ev.target.querySelector('[type=submit]');
     const loss = rows.find(r => r.buy != null && r.sell < r.buy);
     if (loss && !btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = 'Confirmer (vente à perte)'; return toast(`Attention : ${loss.name} vendu ${money(loss.sell)} < achat ${money(loss.buy)}.`, true); }
-    btn.disabled = true; let ok = 0;
+    btn.disabled = true; let ok = 0; const ids = [];
     for (const r of rows) {
       btn.textContent = `Enregistrement ${ok + 1} / ${rows.length}…`;
-      const { error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: r.name, p_category: v.cat || 'Divers', p_unit: v.unit,
+      const { data, error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: r.name, p_category: v.cat || 'Divers', p_unit: v.unit,
         p_buy_price: r.buy, p_sell_price: r.sell, p_initial_qty: r.qty, p_alert: 0, p_barcode: null });
       if (error) { toast(r.name + ' : ' + cleanErr(error), true); break; }
-      ok++;
+      ok++; if (data) ids.push(data);
+    }
+    if (ids.length && (v.kind || v.brand)) {
+      const { error } = await sb.rpc('set_product_tags', { p_products: ids, p_kind: v.kind, p_brand: v.brand === 'Sans marque' ? '' : v.brand });
+      if (error) toast(/set_product_tags/.test(error.message || '') ? 'Type et marque : installez la mise à jour 018 dans Supabase.' : cleanErr(error), true);
     }
     await loadProducts(); S.summary = null;
     if (ok) { toast(`${fam} : ${ok} variante${ok > 1 ? 's' : ''} enregistrée${ok > 1 ? 's' : ''} ✓`); closeSheet(); draw(); }
