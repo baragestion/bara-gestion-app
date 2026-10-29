@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-29h';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-29i';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1353,18 +1353,19 @@ const KIND_BY = { vetements: {
     'Frais': ['Œufs', 'Pain', 'Légumes', 'Fruits', 'Viande', 'Poisson'],
     'Entretien': ['Savon', 'Lessive', 'Javel', 'Insecticide', 'Allumettes', 'Maison'] },
   cosmetiques: {
-    'Corps': ['Savons', 'Crèmes et laits', 'Huiles', 'Parfums', 'Déodorants'],
-    'Cheveux': ['Shampoings', 'Défrisants', 'Mèches et perruques', 'Gels', 'Peignes'],
+    'Corps': ['Savons', 'Crèmes et laits', 'Huiles', 'Visage', 'Parfums', 'Déodorants'],
+    'Cheveux': ['Shampoings', 'Défrisants', 'Soins cheveux', 'Gels', 'Mèches et perruques', 'Peignes'],
     'Maquillage': ['Lèvres', 'Ongles', 'Teint', 'Yeux'],
-    'Hygiène': ['Dents', 'Bébé', 'Femme', 'Rasage'] },
+    'Hygiène': ['Dents', 'Bébé', 'Femme', 'Rasage', 'Coton et mouchoirs'] },
   pieces: {
-    'Moto': ['Pneus', 'Freins', 'Chaînes', 'Moteur', 'Électricité', 'Carrosserie'],
+    'Moto': ['Pneus', 'Freins', 'Chaînes', 'Moteur', 'Électricité', 'Carrosserie', 'Accessoires'],
     'Vélo': ['Pneus', 'Freins', 'Chaînes', 'Autres pièces'],
-    'Huiles': ['Huile moteur', 'Huile 2 temps', 'Graisse'] } };
+    'Huiles': ['Huile moteur', 'Huile 2 temps', 'Graisse'],
+    'Divers': ['Visserie', 'Outils'] } };
 const KIND_IC = { Pantalons: '👖', Chemises: '👔', 'T-shirts': '👕', Chaussures: '👟', Costumes: '🤵', Boubous: '🥻', 'Sous-vêtements': '🩲', Accessoires: '🧢',
   Robes: '👗', Jupes: '👗', Hauts: '👚', Sacs: '👜', Ensembles: '👘', Habits: '🧒', Uniformes: '🎒', Wax: '🧵', 'Faso Dan Fani': '🧵', 'Imprimés': '🧵', Autres: '📦',
   Riz: '🍚', 'Maïs': '🌽', Mil: '🌾', Sorgho: '🌾', Farine: '🌾', 'Pâtes': '🍝', Haricot: '🫘', Sucre: '🧂', Sel: '🧂', Bouillon: '🧂', 'Café et thé': '☕',
-  'Lait en poudre': '🥛', Biscuits: '🍪', Bonbons: '🍬', Huile: '🫗', Fonio: '🌾', 'Épices et sauces': '🌶️', Snacks: '🥜', Maison: '🏠', Beurre: '🧈', Margarine: '🧈', Lait: '🥛', Eau: '💧', Sucreries: '🥤', Jus: '🧃',
+  'Lait en poudre': '🥛', Biscuits: '🍪', Bonbons: '🍬', Huile: '🫗', Fonio: '🌾', Visage: '🧖', 'Soins cheveux': '💆', 'Coton et mouchoirs': '🧻', Visserie: '🔩', Outils: '🔧', 'Épices et sauces': '🌶️', Snacks: '🥜', Maison: '🏠', Beurre: '🧈', Margarine: '🧈', Lait: '🥛', Eau: '💧', Sucreries: '🥤', Jus: '🧃',
   Tomate: '🥫', Poisson: '🐟', 'Légumes': '🥬', 'Œufs': '🥚', Pain: '🍞', Fruits: '🍌', Viande: '🥩', Savon: '🧼', Lessive: '🧺', Javel: '🧴', Insecticide: '🦟', Allumettes: '🔥',
   Savons: '🧼', 'Crèmes et laits': '🧴', Huiles: '🫗', Parfums: '🌸', 'Déodorants': '🧴', Shampoings: '🧴', 'Défrisants': '🧴', 'Mèches et perruques': '💇', Gels: '🧴', Peignes: '🪮',
   'Lèvres': '💄', Ongles: '💅', Teint: '🪞', Yeux: '👁️', Dents: '🪥', 'Bébé': '👶', Femme: '🌸', Rasage: '🪒',
@@ -1382,16 +1383,17 @@ const KIND_RE_BY = { vetements: KIND_RE_V,
     [/lait/i, 'Lait'], [/\beau\b/i, 'Eau'], [/sucrerie|coca|fanta|soda|sprite|boisson/i, 'Sucreries'], [/\bjus/i, 'Jus'], [/tomate/i, 'Tomate'], [/sardine|thon|poisson|maquereau/i, 'Poisson'],
     [/[œo]euf/i, 'Œufs'], [/\bpain/i, 'Pain'], [/savon/i, 'Savon'], [/lessive|omo|d[ée]tergent/i, 'Lessive'], [/javel/i, 'Javel'], [/insecticide|moustique|rambo/i, 'Insecticide'], [/allumette|briquet/i, 'Allumettes'], [/bougie|p[ée]trole|charbon|[ée]ponge|papier|piles?\b|torche|sachets? plastique/i, 'Maison']],
   cosmetiques: [[/savon/i, 'Savons'], [/cr[èe]me|lait de corps|pommade|vaseline|karit/i, 'Crèmes et laits'], [/huile/i, 'Huiles'], [/parfum/i, 'Parfums'], [/d[ée]odorant/i, 'Déodorants'],
-    [/shampo/i, 'Shampoings'], [/d[ée]frisant/i, 'Défrisants'], [/m[èe]che|perruque/i, 'Mèches et perruques'], [/\bgel/i, 'Gels'], [/peigne|brosse [àa] cheveux/i, 'Peignes'],
+    [/cr[èe]me visage|d[ée]maquill|masque visage|savon visage|solaire/i, 'Visage'], [/shampo/i, 'Shampoings'], [/huile pour cheveux|capillaire|coiffante|masque cheveux|teinture|henn[ée]/i, 'Soins cheveux'], [/d[ée]frisant/i, 'Défrisants'], [/m[èe]che|perruque/i, 'Mèches et perruques'], [/\bgel/i, 'Gels'], [/peigne|brosse [àa] cheveux/i, 'Peignes'],
     [/rouge [àa] l|l[èe]vre/i, 'Lèvres'], [/vernis|ongle/i, 'Ongles'], [/poudre|fond de teint/i, 'Teint'], [/crayon|mascara|yeux/i, 'Yeux'], [/dent/i, 'Dents'], [/couche|b[ée]b[ée]/i, 'Bébé'],
-    [/serviette|hygi[ée]nique/i, 'Femme'], [/lame|rasoir/i, 'Rasage']],
+    [/serviette|hygi[ée]nique/i, 'Femme'], [/lame|rasoir|raser/i, 'Rasage'], [/coton|mouchoir/i, 'Coton et mouchoirs']],
   pieces: [[/pneu|chambre [àa] air|rustine/i, 'Pneus'], [/frein|plaquette|m[âa]choire/i, 'Freins'], [/cha[îi]ne|pignon/i, 'Chaînes'], [/huile moteur|huile 4/i, 'Huile moteur'],
     [/2 temps/i, 'Huile 2 temps'], [/graisse/i, 'Graisse'], [/bougie|piston|filtre|carbu|segment|embrayage|roulement/i, 'Moteur'], [/batterie|ampoule|phare|c[âa]ble|fil/i, 'Électricité'],
-    [/r[ée]tro|selle|garde|poign[ée]e|levier|carross/i, 'Carrosserie']] };
+    [/r[ée]tro|selle|garde|poign[ée]e|levier|carross|b[ée]quille|amortisseur|fourche|guidon|[ée]chappement/i, 'Carrosserie'], [/casque|antivol|housse|gants/i, 'Accessoires'],
+    [/boulon|[ée]crou|\bvis\b|rondelle|goupille|collier/i, 'Visserie'], [/cl[ée] |tournevis|pince|d[ée]monte|pompe|colle/i, 'Outils']] };
 const kindOf = p => p.kind || (((KIND_RE_BY[S.shop && S.shop.type] || []).find(([re]) => re.test(p.name || '')) || [])[1]) || 'Autres';
 // Marques connues de la boutique (son « catalogue de marques »), plus quelques marques courantes du métier.
 const BRAND_SUG = { vetements: ['Nike', 'Adidas', 'Puma', 'Zara', "Levi's", 'H&M', 'Lacoste', 'Sans marque'], telephones: ['Samsung', 'Apple', 'Tecno', 'Itel', 'Infinix', 'Xiaomi'],
-  cosmetiques: ['Nivea', 'Dove', 'Vaseline', "L'Oréal", 'Garnier'], pieces: ['Yamaha', 'Honda', 'Haojue', 'Sanili', 'Bajaj'], alimentation: ['Nestlé', 'Nido', 'Jumbo', 'Maggi', 'Mcberry', 'Lipton', 'Coca-Cola', 'Brakina', 'Lafi', 'Sans marque'], materiaux: ['Cimaf', 'Diamond', 'Sopal'] };
+  cosmetiques: ['Nivea', 'Dove', 'Vaseline', "L'Oréal", 'Garnier'], pieces: ['Yamaha', 'Honda', 'Suzuki', 'Haojue', 'Jincheng', 'Sanili', 'Bajaj', 'Sans marque'], alimentation: ['Nestlé', 'Nido', 'Jumbo', 'Maggi', 'Mcberry', 'Lipton', 'Coca-Cola', 'Brakina', 'Lafi', 'Sans marque'], materiaux: ['Cimaf', 'Diamond', 'Sopal'] };
 const shopBrands = () => [...new Set([...S.products.map(p => p.brand).filter(Boolean), ...(BRAND_SUG[S.shop.type] || [])])];
 
 // Navigation commune (Vendre et Produits) dans un rayon : sous-niveau = MARQUES (téléphones, ordinateurs…)
@@ -2413,14 +2415,22 @@ const CATALOG = {
     ['Chaussettes', 'paire', 'Divers'], ['Sous-vêtement', 'piece', 'Divers'], ['Casquette', 'piece', 'Divers'], ['Ceinture', 'piece', 'Divers'], ['Pull', 'piece', 'Divers'], ['Veste', 'piece', 'Divers'],
   ],
   pieces: [
-    ['Pneu moto', 'piece', 'Moto'], ['Chambre à air moto', 'piece', 'Moto'], ['Chaîne moto', 'piece', 'Moto'], ['Kit chaîne moto', 'piece', 'Moto'],
-    ['Plaquettes de frein', 'paire', 'Moto'], ['Mâchoires de frein', 'paire', 'Moto'], ['Bougie', 'piece', 'Moto'], ['Filtre à air', 'piece', 'Moto'],
-    ["Câble d'embrayage", 'piece', 'Moto'], ['Câble de frein', 'piece', 'Moto'], ["Câble d'accélérateur", 'piece', 'Moto'], ['Batterie moto', 'piece', 'Moto'],
-    ['Ampoule de phare', 'piece', 'Moto'], ['Rétroviseur', 'piece', 'Moto'], ['Levier de frein', 'piece', 'Moto'], ['Poignées', 'paire', 'Moto'], ['Selle', 'piece', 'Moto'],
-    ['Huile moteur 1 L', 'piece', 'Huiles'], ['Huile 2 temps', 'piece', 'Huiles'], ['Graisse', 'piece', 'Huiles'],
-    ['Pneu vélo', 'piece', 'Vélo'], ['Chambre à air vélo', 'piece', 'Vélo'], ['Chaîne vélo', 'piece', 'Vélo'], ['Rayons', 'piece', 'Vélo'], ['Patins de frein vélo', 'paire', 'Vélo'],
-    ['Pédales', 'paire', 'Vélo'], ['Pompe à vélo', 'piece', 'Vélo'],
-    ['Roulement', 'piece', 'Divers'], ['Boulons et écrous', 'kilo', 'Divers'], ['Rustine', 'piece', 'Divers'], ['Clé plate', 'piece', 'Divers'],
+    ['Pneu avant 2.75-17', 'piece', 'Moto', 'Pneus'], ['Pneu arrière 3.00-17', 'piece', 'Moto', 'Pneus'], ['Pneu arrière 3.00-18', 'piece', 'Moto', 'Pneus'], ['Pneu 2.50-17', 'piece', 'Moto', 'Pneus'], ['Chambre à air 17', 'piece', 'Moto', 'Pneus'], ['Chambre à air 18', 'piece', 'Moto', 'Pneus'], ['Valve', 'piece', 'Moto', 'Pneus'], ['Jante moto', 'piece', 'Moto', 'Pneus'], ['Rayons moto (jeu)', 'piece', 'Moto', 'Pneus'], ['Rustines (boîte)', 'piece', 'Moto', 'Pneus'],
+    ['Plaquettes de frein avant', 'piece', 'Moto', 'Freins'], ['Mâchoires de frein arrière', 'piece', 'Moto', 'Freins'], ['Câble de frein avant', 'piece', 'Moto', 'Freins'], ['Câble de frein arrière', 'piece', 'Moto', 'Freins'], ['Levier de frein', 'piece', 'Moto', 'Freins'], ['Pédale de frein', 'piece', 'Moto', 'Freins'], ['Disque de frein', 'piece', 'Moto', 'Freins'], ['Maître-cylindre', 'piece', 'Moto', 'Freins'],
+    ['Chaîne moto', 'piece', 'Moto', 'Chaînes'], ['Kit chaîne (chaîne et pignons)', 'piece', 'Moto', 'Chaînes'], ['Pignon de sortie', 'piece', 'Moto', 'Chaînes'], ['Couronne', 'piece', 'Moto', 'Chaînes'], ['Tendeur de chaîne', 'piece', 'Moto', 'Chaînes'], ['Cache-chaîne', 'piece', 'Moto', 'Chaînes'],
+    ['Bougie', 'piece', 'Moto', 'Moteur'], ['Antiparasite', 'piece', 'Moto', 'Moteur'], ['Filtre à air', 'piece', 'Moto', 'Moteur'], ['Filtre à huile', 'piece', 'Moto', 'Moteur'], ['Carburateur', 'piece', 'Moto', 'Moteur'], ['Kit piston', 'piece', 'Moto', 'Moteur'], ['Segments', 'piece', 'Moto', 'Moteur'], ['Joint de culasse', 'piece', 'Moto', 'Moteur'], ['Pochette de joints', 'piece', 'Moto', 'Moteur'], ["Disques d'embrayage", 'piece', 'Moto', 'Moteur'], ["Câble d'embrayage", 'piece', 'Moto', 'Moteur'], ["Câble d'accélérateur", 'piece', 'Moto', 'Moteur'], ['Kick', 'piece', 'Moto', 'Moteur'], ["Robinet d'essence", 'piece', 'Moto', 'Moteur'], ["Durite d'essence", 'piece', 'Moto', 'Moteur'], ['Roulement', 'piece', 'Moto', 'Moteur'], ['Soupapes', 'piece', 'Moto', 'Moteur'], ['Chaîne de distribution', 'piece', 'Moto', 'Moteur'],
+    ['Batterie 12 V', 'piece', 'Moto', 'Électricité'], ['Ampoule de phare', 'piece', 'Moto', 'Électricité'], ['Ampoule de clignotant', 'piece', 'Moto', 'Électricité'], ['Ampoule de stop', 'piece', 'Moto', 'Électricité'], ['Clignotant', 'piece', 'Moto', 'Électricité'], ['Feu arrière', 'piece', 'Moto', 'Électricité'], ['Phare complet', 'piece', 'Moto', 'Électricité'], ['Klaxon', 'piece', 'Moto', 'Électricité'], ['Régulateur', 'piece', 'Moto', 'Électricité'], ["Bobine d'allumage", 'piece', 'Moto', 'Électricité'], ['CDI', 'piece', 'Moto', 'Électricité'], ['Commodo', 'piece', 'Moto', 'Électricité'], ['Contacteur à clé', 'piece', 'Moto', 'Électricité'], ['Fusibles', 'piece', 'Moto', 'Électricité'], ['Compteur', 'piece', 'Moto', 'Électricité'], ['Fil électrique', 'metre', 'Moto', 'Électricité'],
+    ['Rétroviseur', 'piece', 'Moto', 'Carrosserie'], ['Selle', 'piece', 'Moto', 'Carrosserie'], ['Garde-boue avant', 'piece', 'Moto', 'Carrosserie'], ['Garde-boue arrière', 'piece', 'Moto', 'Carrosserie'], ['Repose-pieds', 'piece', 'Moto', 'Carrosserie'], ['Béquille', 'piece', 'Moto', 'Carrosserie'], ['Amortisseur arrière', 'piece', 'Moto', 'Carrosserie'], ['Tube de fourche', 'piece', 'Moto', 'Carrosserie'], ['Guidon', 'piece', 'Moto', 'Carrosserie'], ['Cache latéral', 'piece', 'Moto', 'Carrosserie'], ["Pot d'échappement", 'piece', 'Moto', 'Carrosserie'], ['Poignées', 'paire', 'Moto', 'Carrosserie'],
+    ['Casque', 'piece', 'Moto', 'Accessoires'], ['Antivol', 'piece', 'Moto', 'Accessoires'], ['Housse de selle', 'piece', 'Moto', 'Accessoires'], ['Porte-bagages', 'piece', 'Moto', 'Accessoires'], ['Gants', 'paire', 'Moto', 'Accessoires'],
+    ['Pneu vélo', 'piece', 'Vélo', 'Pneus'], ['Chambre à air vélo', 'piece', 'Vélo', 'Pneus'], ['Rayons vélo (jeu)', 'piece', 'Vélo', 'Pneus'], ['Jante vélo', 'piece', 'Vélo', 'Pneus'],
+    ['Patins de frein vélo', 'piece', 'Vélo', 'Freins'], ['Câble de frein vélo', 'piece', 'Vélo', 'Freins'], ['Levier de frein vélo', 'piece', 'Vélo', 'Freins'],
+    ['Chaîne vélo', 'piece', 'Vélo', 'Chaînes'], ['Pignon vélo', 'piece', 'Vélo', 'Chaînes'], ['Pédalier', 'piece', 'Vélo', 'Chaînes'], ['Pédales', 'paire', 'Vélo', 'Chaînes'],
+    ['Selle vélo', 'piece', 'Vélo', 'Autres pièces'], ['Guidon vélo', 'piece', 'Vélo', 'Autres pièces'], ['Roulement vélo (billes)', 'piece', 'Vélo', 'Autres pièces'], ['Sonnette', 'piece', 'Vélo', 'Autres pièces'], ['Pompe à vélo', 'piece', 'Vélo', 'Autres pièces'], ['Béquille vélo', 'piece', 'Vélo', 'Autres pièces'], ['Porte-bagages vélo', 'piece', 'Vélo', 'Autres pièces'],
+    ['Huile moteur 1 L', 'piece', 'Huiles', 'Huile moteur'], ['Huile moteur 4 L', 'piece', 'Huiles', 'Huile moteur'], ['Huile moteur au litre', 'litre', 'Huiles', 'Huile moteur'], ['Huile de fourche', 'piece', 'Huiles', 'Huile moteur'],
+    ['Huile 2 temps 1 L', 'piece', 'Huiles', 'Huile 2 temps'], ['Huile 2 temps au litre', 'litre', 'Huiles', 'Huile 2 temps'],
+    ['Graisse (boîte)', 'piece', 'Huiles', 'Graisse'], ['Liquide de frein', 'piece', 'Huiles', 'Graisse'], ['Dégrippant (aérosol)', 'piece', 'Huiles', 'Graisse'],
+    ['Boulons et écrous', 'piece', 'Divers', 'Visserie'], ['Vis', 'piece', 'Divers', 'Visserie'], ['Rondelles', 'piece', 'Divers', 'Visserie'], ['Goupilles', 'piece', 'Divers', 'Visserie'], ['Colliers de serrage', 'piece', 'Divers', 'Visserie'],
+    ['Clé plate', 'piece', 'Divers', 'Outils'], ['Clé à bougie', 'piece', 'Divers', 'Outils'], ['Clé en croix', 'piece', 'Divers', 'Outils'], ['Tournevis', 'piece', 'Divers', 'Outils'], ['Pince', 'piece', 'Divers', 'Outils'], ['Démonte-pneu', 'piece', 'Divers', 'Outils'], ['Pompe à pied', 'piece', 'Divers', 'Outils'], ['Colle forte (tube)', 'piece', 'Divers', 'Outils'],
   ],
   telephones: [
     ['Chargeur', 'piece', 'Accessoires'], ['Câble USB', 'piece', 'Accessoires'], ['Écouteurs', 'piece', 'Accessoires'], ['Kit main libre', 'piece', 'Accessoires'],
@@ -2429,11 +2439,27 @@ const CATALOG = {
     ['Haut-parleur Bluetooth', 'piece', 'Accessoires'], ['Lampe torche rechargeable', 'piece', 'Accessoires'], ['Piles', 'piece', 'Accessoires'], ['Adaptateur de prise', 'piece', 'Accessoires'], ['Multiprise', 'piece', 'Accessoires'],
   ],
   cosmetiques: [
-    ['Savon de toilette', 'piece', 'Corps'], ['Crème de corps', 'piece', 'Corps'], ['Lait de corps', 'piece', 'Corps'], ['Pommade', 'piece', 'Corps'], ['Vaseline', 'piece', 'Corps'],
-    ['Huile de corps', 'piece', 'Corps'], ['Beurre de karité', 'piece', 'Corps'], ['Parfum', 'piece', 'Corps'], ['Déodorant', 'piece', 'Corps'], ['Éponge de bain', 'piece', 'Corps'],
-    ['Shampoing', 'piece', 'Cheveux'], ['Défrisant', 'piece', 'Cheveux'], ['Mèches', 'piece', 'Cheveux'], ['Perruque', 'piece', 'Cheveux'], ['Gel coiffant', 'piece', 'Cheveux'], ['Peigne', 'piece', 'Cheveux'],
-    ['Rouge à lèvres', 'piece', 'Maquillage'], ['Vernis à ongles', 'piece', 'Maquillage'], ['Poudre', 'piece', 'Maquillage'], ['Crayon pour les yeux', 'piece', 'Maquillage'],
-    ['Brosse à dents', 'piece', 'Hygiène'], ['Dentifrice', 'piece', 'Hygiène'], ['Serviettes hygiéniques', 'piece', 'Hygiène'], ['Couches bébé', 'piece', 'Hygiène'], ['Lames de rasoir', 'piece', 'Hygiène'],
+    ['Savon de toilette', 'piece', 'Corps', 'Savons'], ['Savon au karité', 'piece', 'Corps', 'Savons'], ['Savon noir', 'piece', 'Corps', 'Savons'], ['Savon antiseptique', 'piece', 'Corps', 'Savons'], ['Savon liquide', 'piece', 'Corps', 'Savons'], ['Gel douche', 'piece', 'Corps', 'Savons'], ['Éponge de bain', 'piece', 'Corps', 'Savons'],
+    ['Crème de corps', 'piece', 'Corps', 'Crèmes et laits'], ['Lait de corps', 'piece', 'Corps', 'Crèmes et laits'], ['Pommade', 'piece', 'Corps', 'Crèmes et laits'], ['Vaseline', 'piece', 'Corps', 'Crèmes et laits'], ['Crème pour les mains', 'piece', 'Corps', 'Crèmes et laits'], ['Crème pour les pieds', 'piece', 'Corps', 'Crèmes et laits'], ['Beurre de karité', 'piece', 'Corps', 'Crèmes et laits'],
+    ['Huile de corps', 'piece', 'Corps', 'Huiles'], ['Huile de coco', 'piece', 'Corps', 'Huiles'], ["Huile d'amande", 'piece', 'Corps', 'Huiles'], ['Huile de karité', 'piece', 'Corps', 'Huiles'],
+    ['Crème visage', 'piece', 'Corps', 'Visage'], ['Lait démaquillant', 'piece', 'Corps', 'Visage'], ['Savon visage', 'piece', 'Corps', 'Visage'], ['Masque visage', 'piece', 'Corps', 'Visage'], ['Crème solaire', 'piece', 'Corps', 'Visage'],
+    ['Parfum (flacon)', 'piece', 'Corps', 'Parfums'], ['Eau de toilette', 'piece', 'Corps', 'Parfums'], ['Parfum roll-on', 'piece', 'Corps', 'Parfums'], ['Musc', 'piece', 'Corps', 'Parfums'], ['Encens', 'piece', 'Corps', 'Parfums'],
+    ['Déodorant spray', 'piece', 'Corps', 'Déodorants'], ['Déodorant bille', 'piece', 'Corps', 'Déodorants'], ['Talc', 'piece', 'Corps', 'Déodorants'],
+    ['Shampoing', 'piece', 'Cheveux', 'Shampoings'], ['Shampoing 2 en 1', 'piece', 'Cheveux', 'Shampoings'], ['Après-shampoing', 'piece', 'Cheveux', 'Shampoings'],
+    ['Défrisant (pot)', 'piece', 'Cheveux', 'Défrisants'], ['Défrisant (kit)', 'piece', 'Cheveux', 'Défrisants'], ['Défrisant enfant', 'piece', 'Cheveux', 'Défrisants'],
+    ['Huile pour cheveux', 'piece', 'Cheveux', 'Soins cheveux'], ['Crème coiffante', 'piece', 'Cheveux', 'Soins cheveux'], ['Lait capillaire', 'piece', 'Cheveux', 'Soins cheveux'], ['Masque cheveux', 'piece', 'Cheveux', 'Soins cheveux'], ['Teinture pour cheveux', 'piece', 'Cheveux', 'Soins cheveux'], ['Henné', 'piece', 'Cheveux', 'Soins cheveux'],
+    ['Gel coiffant', 'piece', 'Cheveux', 'Gels'], ['Gel fixant', 'piece', 'Cheveux', 'Gels'],
+    ['Mèches (paquet)', 'piece', 'Cheveux', 'Mèches et perruques'], ['Mèches à tresser', 'piece', 'Cheveux', 'Mèches et perruques'], ['Perruque', 'piece', 'Cheveux', 'Mèches et perruques'], ['Tissage', 'piece', 'Cheveux', 'Mèches et perruques'],
+    ['Peigne', 'piece', 'Cheveux', 'Peignes'], ['Peigne afro', 'piece', 'Cheveux', 'Peignes'], ['Brosse à cheveux', 'piece', 'Cheveux', 'Peignes'], ['Bonnet de nuit', 'piece', 'Cheveux', 'Peignes'], ['Élastiques', 'piece', 'Cheveux', 'Peignes'], ['Barrettes', 'piece', 'Cheveux', 'Peignes'], ['Épingles', 'piece', 'Cheveux', 'Peignes'],
+    ['Rouge à lèvres', 'piece', 'Maquillage', 'Lèvres'], ['Gloss', 'piece', 'Maquillage', 'Lèvres'], ['Crayon à lèvres', 'piece', 'Maquillage', 'Lèvres'], ['Baume à lèvres', 'piece', 'Maquillage', 'Lèvres'],
+    ['Vernis à ongles', 'piece', 'Maquillage', 'Ongles'], ['Dissolvant', 'piece', 'Maquillage', 'Ongles'], ['Faux ongles', 'piece', 'Maquillage', 'Ongles'], ['Colle à ongles', 'piece', 'Maquillage', 'Ongles'], ['Lime à ongles', 'piece', 'Maquillage', 'Ongles'], ['Coupe-ongles', 'piece', 'Maquillage', 'Ongles'],
+    ['Poudre', 'piece', 'Maquillage', 'Teint'], ['Fond de teint', 'piece', 'Maquillage', 'Teint'], ['Correcteur', 'piece', 'Maquillage', 'Teint'],
+    ['Crayon pour les yeux', 'piece', 'Maquillage', 'Yeux'], ['Mascara', 'piece', 'Maquillage', 'Yeux'], ['Eye-liner', 'piece', 'Maquillage', 'Yeux'], ['Fard à paupières', 'piece', 'Maquillage', 'Yeux'], ['Faux cils', 'piece', 'Maquillage', 'Yeux'], ['Crayon à sourcils', 'piece', 'Maquillage', 'Yeux'], ['Khôl', 'piece', 'Maquillage', 'Yeux'],
+    ['Brosse à dents', 'piece', 'Hygiène', 'Dents'], ['Dentifrice', 'piece', 'Hygiène', 'Dents'], ['Bain de bouche', 'piece', 'Hygiène', 'Dents'], ['Cure-dents', 'piece', 'Hygiène', 'Dents'],
+    ['Couches bébé', 'piece', 'Hygiène', 'Bébé'], ['Lingettes bébé', 'piece', 'Hygiène', 'Bébé'], ['Talc bébé', 'piece', 'Hygiène', 'Bébé'], ['Savon bébé', 'piece', 'Hygiène', 'Bébé'], ['Lait de toilette bébé', 'piece', 'Hygiène', 'Bébé'],
+    ['Serviettes hygiéniques', 'piece', 'Hygiène', 'Femme'], ['Protège-slips', 'piece', 'Hygiène', 'Femme'],
+    ['Lames de rasoir', 'piece', 'Hygiène', 'Rasage'], ['Rasoir jetable', 'piece', 'Hygiène', 'Rasage'], ['Mousse à raser', 'piece', 'Hygiène', 'Rasage'], ['Après-rasage', 'piece', 'Hygiène', 'Rasage'],
+    ['Coton-tiges', 'piece', 'Hygiène', 'Coton et mouchoirs'], ['Coton (paquet)', 'piece', 'Hygiène', 'Coton et mouchoirs'], ['Mouchoirs en papier', 'piece', 'Hygiène', 'Coton et mouchoirs'],
   ],
   alimentation: [
     ['Riz 50 kg', 'sac', 'Céréales', 'Riz'], ['Riz 25 kg', 'sac', 'Céréales', 'Riz'], ['Riz au kilo', 'kilo', 'Céréales', 'Riz'], ['Riz local 50 kg', 'sac', 'Céréales', 'Riz'], ['Riz brisé', 'kilo', 'Céréales', 'Riz'], ['Riz parfumé 5 kg', 'piece', 'Céréales', 'Riz'],
