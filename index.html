@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-29f';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-29g';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1345,13 +1345,13 @@ const KIND_BY = { vetements: {
   Enfants: ['Habits', 'Chaussures', 'Uniformes', 'Accessoires'],
   Pagnes: ['Wax', 'Faso Dan Fani', 'Imprimés'] },
   alimentation: {
-    'Céréales': ['Riz', 'Maïs', 'Mil', 'Sorgho', 'Farine', 'Pâtes', 'Haricot'],
-    'Épicerie': ['Sucre', 'Sel', 'Bouillon', 'Café et thé', 'Lait en poudre', 'Biscuits', 'Bonbons'],
+    'Céréales': ['Riz', 'Maïs', 'Mil', 'Fonio', 'Farine', 'Pâtes', 'Haricot'],
+    'Épicerie': ['Biscuits', 'Bonbons', 'Snacks', 'Sucre', 'Sel', 'Bouillon', 'Épices et sauces', 'Café et thé', 'Lait en poudre', 'Bébé'],
     'Huiles': ['Huile', 'Beurre', 'Margarine'],
     'Lait et boissons': ['Lait', 'Eau', 'Sucreries', 'Jus'],
     'Conserves': ['Tomate', 'Poisson', 'Légumes'],
     'Frais': ['Œufs', 'Pain', 'Légumes', 'Fruits', 'Viande', 'Poisson'],
-    'Entretien': ['Savon', 'Lessive', 'Javel', 'Insecticide', 'Allumettes'] },
+    'Entretien': ['Savon', 'Lessive', 'Javel', 'Insecticide', 'Allumettes', 'Maison'] },
   cosmetiques: {
     'Corps': ['Savons', 'Crèmes et laits', 'Huiles', 'Parfums', 'Déodorants'],
     'Cheveux': ['Shampoings', 'Défrisants', 'Mèches et perruques', 'Gels', 'Peignes'],
@@ -1364,7 +1364,7 @@ const KIND_BY = { vetements: {
 const KIND_IC = { Pantalons: '👖', Chemises: '👔', 'T-shirts': '👕', Chaussures: '👟', Costumes: '🤵', Boubous: '🥻', 'Sous-vêtements': '🩲', Accessoires: '🧢',
   Robes: '👗', Jupes: '👗', Hauts: '👚', Sacs: '👜', Ensembles: '👘', Habits: '🧒', Uniformes: '🎒', Wax: '🧵', 'Faso Dan Fani': '🧵', 'Imprimés': '🧵', Autres: '📦',
   Riz: '🍚', 'Maïs': '🌽', Mil: '🌾', Sorgho: '🌾', Farine: '🌾', 'Pâtes': '🍝', Haricot: '🫘', Sucre: '🧂', Sel: '🧂', Bouillon: '🧂', 'Café et thé': '☕',
-  'Lait en poudre': '🥛', Biscuits: '🍪', Bonbons: '🍬', Huile: '🫗', Beurre: '🧈', Margarine: '🧈', Lait: '🥛', Eau: '💧', Sucreries: '🥤', Jus: '🧃',
+  'Lait en poudre': '🥛', Biscuits: '🍪', Bonbons: '🍬', Huile: '🫗', Fonio: '🌾', 'Épices et sauces': '🌶️', Snacks: '🥜', Maison: '🏠', Beurre: '🧈', Margarine: '🧈', Lait: '🥛', Eau: '💧', Sucreries: '🥤', Jus: '🧃',
   Tomate: '🥫', Poisson: '🐟', 'Légumes': '🥬', 'Œufs': '🥚', Pain: '🍞', Fruits: '🍌', Viande: '🥩', Savon: '🧼', Lessive: '🧺', Javel: '🧴', Insecticide: '🦟', Allumettes: '🔥',
   Savons: '🧼', 'Crèmes et laits': '🧴', Huiles: '🫗', Parfums: '🌸', 'Déodorants': '🧴', Shampoings: '🧴', 'Défrisants': '🧴', 'Mèches et perruques': '💇', Gels: '🧴', Peignes: '🪮',
   'Lèvres': '💄', Ongles: '💅', Teint: '🪞', Yeux: '👁️', Dents: '🪥', 'Bébé': '👶', Femme: '🌸', Rasage: '🪒',
@@ -1376,11 +1376,11 @@ const KIND_RE_V = [[/chaussure|basket|sandale|tapette|escarpin|mocassin/i, 'Chau
 // Type d'un produit : celui enregistré, sinon deviné d'après le nom (les produits déjà créés sont rangés tout seuls).
 // Par métier (un « sac de riz » n'est pas un « Sac » à main).
 const KIND_RE_BY = { vetements: KIND_RE_V,
-  alimentation: [[/riz/i, 'Riz'], [/ma[iï]s/i, 'Maïs'], [/\bmil\b/i, 'Mil'], [/sorgho/i, 'Sorgho'], [/farine/i, 'Farine'], [/p[âa]te|spaghetti|macaroni/i, 'Pâtes'],
-    [/haricot|niébé|niebe/i, 'Haricot'], [/sucre\b|sucre en/i, 'Sucre'], [/\bsel\b/i, 'Sel'], [/bouillon|maggi|cube|jumbo/i, 'Bouillon'], [/caf[ée]|th[ée]\b|lipton|nescaf/i, 'Café et thé'],
-    [/lait en poudre|nido|vitalait/i, 'Lait en poudre'], [/biscuit/i, 'Biscuits'], [/bonbon/i, 'Bonbons'], [/huile/i, 'Huile'], [/beurre/i, 'Beurre'], [/margarine/i, 'Margarine'],
+  alimentation: [[/riz/i, 'Riz'], [/ma[iï]s/i, 'Maïs'], [/\bmil\b|sorgho/i, 'Mil'], [/fonio/i, 'Fonio'], [/farine/i, 'Farine'], [/p[âa]te|spaghetti|macaroni/i, 'Pâtes'],
+    [/haricot|niébé|niebe/i, 'Haricot'], [/sucre\b|sucre en/i, 'Sucre'], [/\bsel\b/i, 'Sel'], [/bouillon|maggi|cube|jumbo|soumbala/i, 'Bouillon'], [/poivre|piment en poudre|mayonnaise|moutarde|vinaigre|ketchup|levure/i, 'Épices et sauces'], [/caf[ée]|th[ée]\b|lipton|nescaf/i, 'Café et thé'],
+    [/lait en poudre|nido|vitalait/i, 'Lait en poudre'], [/biscuit|gaufrette|cookie|madeleine|\bcake\b|croissant/i, 'Biscuits'], [/bonbon|sucette|chewing|chocolat en barre|tablette/i, 'Bonbons'], [/chips|arachides? grill|pop-?corn/i, 'Snacks'], [/pour b[ée]b[ée]|bouillie/i, 'Bébé'], [/huile/i, 'Huile'], [/beurre/i, 'Beurre'], [/margarine/i, 'Margarine'],
     [/lait/i, 'Lait'], [/\beau\b/i, 'Eau'], [/sucrerie|coca|fanta|soda|sprite|boisson/i, 'Sucreries'], [/\bjus/i, 'Jus'], [/tomate/i, 'Tomate'], [/sardine|thon|poisson|maquereau/i, 'Poisson'],
-    [/[œo]euf/i, 'Œufs'], [/\bpain/i, 'Pain'], [/savon/i, 'Savon'], [/lessive|omo|d[ée]tergent/i, 'Lessive'], [/javel/i, 'Javel'], [/insecticide|moustique|rambo/i, 'Insecticide'], [/allumette|briquet/i, 'Allumettes']],
+    [/[œo]euf/i, 'Œufs'], [/\bpain/i, 'Pain'], [/savon/i, 'Savon'], [/lessive|omo|d[ée]tergent/i, 'Lessive'], [/javel/i, 'Javel'], [/insecticide|moustique|rambo/i, 'Insecticide'], [/allumette|briquet/i, 'Allumettes'], [/bougie|p[ée]trole|charbon|[ée]ponge|papier|piles?\b|torche|sachets? plastique/i, 'Maison']],
   cosmetiques: [[/savon/i, 'Savons'], [/cr[èe]me|lait de corps|pommade|vaseline|karit/i, 'Crèmes et laits'], [/huile/i, 'Huiles'], [/parfum/i, 'Parfums'], [/d[ée]odorant/i, 'Déodorants'],
     [/shampo/i, 'Shampoings'], [/d[ée]frisant/i, 'Défrisants'], [/m[èe]che|perruque/i, 'Mèches et perruques'], [/\bgel/i, 'Gels'], [/peigne|brosse [àa] cheveux/i, 'Peignes'],
     [/rouge [àa] l|l[èe]vre/i, 'Lèvres'], [/vernis|ongle/i, 'Ongles'], [/poudre|fond de teint/i, 'Teint'], [/crayon|mascara|yeux/i, 'Yeux'], [/dent/i, 'Dents'], [/couche|b[ée]b[ée]/i, 'Bébé'],
@@ -1391,7 +1391,7 @@ const KIND_RE_BY = { vetements: KIND_RE_V,
 const kindOf = p => p.kind || (((KIND_RE_BY[S.shop && S.shop.type] || []).find(([re]) => re.test(p.name || '')) || [])[1]) || 'Autres';
 // Marques connues de la boutique (son « catalogue de marques »), plus quelques marques courantes du métier.
 const BRAND_SUG = { vetements: ['Nike', 'Adidas', 'Puma', 'Zara', "Levi's", 'H&M', 'Lacoste', 'Sans marque'], telephones: ['Samsung', 'Apple', 'Tecno', 'Itel', 'Infinix', 'Xiaomi'],
-  cosmetiques: ['Nivea', 'Dove', 'Vaseline', "L'Oréal", 'Garnier'], pieces: ['Yamaha', 'Honda', 'Haojue', 'Sanili', 'Bajaj'], alimentation: ['Nestlé', 'Dangote', 'Jumbo', 'Maggi'], materiaux: ['Cimaf', 'Diamond', 'Sopal'] };
+  cosmetiques: ['Nivea', 'Dove', 'Vaseline', "L'Oréal", 'Garnier'], pieces: ['Yamaha', 'Honda', 'Haojue', 'Sanili', 'Bajaj'], alimentation: ['Nestlé', 'Nido', 'Jumbo', 'Maggi', 'Mcberry', 'Lipton', 'Coca-Cola', 'Brakina', 'Lafi', 'Sans marque'], materiaux: ['Cimaf', 'Diamond', 'Sopal'] };
 const shopBrands = () => [...new Set([...S.products.map(p => p.brand).filter(Boolean), ...(BRAND_SUG[S.shop.type] || [])])];
 
 // Navigation commune (Vendre et Produits) dans un rayon : sous-niveau = MARQUES (téléphones, ordinateurs…)
@@ -1436,7 +1436,7 @@ const noBrand = n => { const w = String(n).split(/\s+/); return /^(samsung|tecno
 function prodTile(p) {
     const [bg, fg] = tileColor(p.category || p.name), inCart = S.cart.get(p.id), out = Number(p.stock_qty) <= 0;
     return `<button class="tile${inCart ? ' in' : ''}" data-add="${esc(p.id)}" ${out && !S.offline ? 'disabled' : ''} aria-label="${esc(p.name)}, ${esc(money(p.sell_price))}${inCart ? ', ' + esc(qty(inCart)) + ' dans le panier' : ''}">
-      ${artFor(p.name + ' ' + (p.kind || ''), p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(p.name + ' ' + (p.kind || ''), p.category)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>`}
+      ${artFor(p.name + ' ' + (p.kind || ''), p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(p.name + ' ' + (p.kind || ''), p.category)}</span>` : kindEmoji(p) ? `<span class="ini" style="background:#F6F4EE;font-size:30px" aria-hidden="true">${kindEmoji(p)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>`}
       <span class="tn">${esc(!S.q.trim() && S.nav && S.nav.sub && devType(S.cat) ? noBrand(p.name) : p.name)}</span>
       ${out ? '<span class="ts">Épuisé</span>' : `<span class="tp">${esc(fmtNum.format(p.sell_price))}</span>`}
       ${inCart ? `<span class="tq" aria-hidden="true">${esc(qty(inCart))}</span>` : ''}</button>`;
@@ -2373,9 +2373,13 @@ function trackSheet(p) {
 }
 
 /* ===== Onglet Produits ===== */
+// Pas de dessin : l'image du type (🍪 Biscuits, 🍚 Riz…) plutôt que des lettres.
+const kindEmoji = p => { const k = kindOf(p); return k !== 'Autres' && KIND_IC[k] ? KIND_IC[k] : ''; };
 function prodIcon(p, size, extra) {
   const art = artFor(p.name + ' ' + (p.kind || ''), p.category), [bg, fg] = tileColor(p.category || p.name), st = `width:${size}px;height:${size}px;${extra || ''}`;
+  const em = !art && kindEmoji(p);
   return art ? `<span class="pic" style="background:#F6F4EE;${st}" aria-hidden="true">${art}</span>`
+             : em ? `<span class="pic" style="background:#F6F4EE;font-size:${Math.round(size * 0.55)}px;${st}" aria-hidden="true">${em}</span>`
              : `<span class="pic" style="background:${bg};color:${fg};${st}" aria-hidden="true">${esc(initials(p.name))}</span>`;
 }
 const isLow = p => Number(p.stock_qty) <= Number(p.alert_threshold);
@@ -2432,16 +2436,47 @@ const CATALOG = {
     ['Brosse à dents', 'piece', 'Hygiène'], ['Dentifrice', 'piece', 'Hygiène'], ['Serviettes hygiéniques', 'piece', 'Hygiène'], ['Couches bébé', 'piece', 'Hygiène'], ['Lames de rasoir', 'piece', 'Hygiène'],
   ],
   alimentation: [
-    ['Riz 50 kg', 'sac', 'Céréales'], ['Riz au kilo', 'kilo', 'Céréales'], ['Maïs', 'kilo', 'Céréales'], ['Mil', 'kilo', 'Céréales'], ['Farine de blé', 'kilo', 'Céréales'],
-    ['Haricot (niébé)', 'kilo', 'Céréales'], ['Arachide', 'kilo', 'Céréales'], ['Spaghetti', 'piece', 'Céréales'], ['Pâtes alimentaires', 'piece', 'Céréales'],
-    ['Sucre en poudre', 'kilo', 'Épicerie'], ['Sucre en morceaux', 'piece', 'Épicerie'], ['Sel', 'kilo', 'Épicerie'], ['Bouillon cube', 'piece', 'Épicerie'], ['Tomate concentrée', 'piece', 'Épicerie'],
-    ['Huile 1 L', 'piece', 'Huiles'], ['Huile 5 L', 'piece', 'Huiles'], ['Huile 20 L', 'piece', 'Huiles'],
-    ['Lait en poudre', 'piece', 'Lait et boissons'], ['Lait concentré', 'piece', 'Lait et boissons'], ['Café', 'piece', 'Lait et boissons'], ['Thé', 'piece', 'Lait et boissons'],
-    ['Eau minérale (pack)', 'carton', 'Lait et boissons'], ['Boisson sucrée', 'piece', 'Lait et boissons'], ['Sardine', 'piece', 'Conserves'], ['Biscuits', 'piece', 'Conserves'],
-    ['Œufs (plaquette)', 'piece', 'Frais'], ['Savon', 'piece', 'Entretien'], ['Lessive en poudre', 'piece', 'Entretien'], ['Pétrole', 'litre', 'Entretien'], ['Bougies', 'piece', 'Entretien'], ['Allumettes', 'piece', 'Entretien'],
+    ['Riz 50 kg', 'sac', 'Céréales', 'Riz'], ['Riz 25 kg', 'sac', 'Céréales', 'Riz'], ['Riz au kilo', 'kilo', 'Céréales', 'Riz'], ['Riz local 50 kg', 'sac', 'Céréales', 'Riz'], ['Riz brisé', 'kilo', 'Céréales', 'Riz'], ['Riz parfumé 5 kg', 'piece', 'Céréales', 'Riz'],
+    ['Maïs', 'kilo', 'Céréales', 'Maïs'], ['Maïs 100 kg', 'sac', 'Céréales', 'Maïs'], ['Farine de maïs', 'kilo', 'Céréales', 'Maïs'], ['Semoule de maïs', 'kilo', 'Céréales', 'Maïs'],
+    ['Mil', 'kilo', 'Céréales', 'Mil'], ['Farine de mil', 'kilo', 'Céréales', 'Mil'], ['Sorgho', 'kilo', 'Céréales', 'Mil'],
+    ['Fonio', 'kilo', 'Céréales', 'Fonio'], ['Fonio précuit (sachet)', 'piece', 'Céréales', 'Fonio'],
+    ['Farine de blé 50 kg', 'sac', 'Céréales', 'Farine'], ['Farine de blé', 'kilo', 'Céréales', 'Farine'], ['Farine de blé (sachet 1 kg)', 'piece', 'Céréales', 'Farine'],
+    ['Spaghetti 500 g', 'piece', 'Céréales', 'Pâtes'], ['Spaghetti (carton)', 'carton', 'Céréales', 'Pâtes'], ['Macaroni', 'piece', 'Céréales', 'Pâtes'], ['Coquillettes', 'piece', 'Céréales', 'Pâtes'], ['Vermicelle', 'piece', 'Céréales', 'Pâtes'], ['Couscous', 'piece', 'Céréales', 'Pâtes'],
+    ['Haricot (niébé)', 'kilo', 'Céréales', 'Haricot'], ['Arachide décortiquée', 'kilo', 'Céréales', 'Haricot'], ['Petit pois secs', 'kilo', 'Céréales', 'Haricot'], ['Sésame', 'kilo', 'Céréales', 'Haricot'], ['Soja', 'kilo', 'Céréales', 'Haricot'],
+    ['Sucre en poudre', 'kilo', 'Épicerie', 'Sucre'], ['Sucre 50 kg', 'sac', 'Épicerie', 'Sucre'], ['Sucre en poudre (sachet 1 kg)', 'piece', 'Épicerie', 'Sucre'], ['Sucre en morceaux (boîte)', 'piece', 'Épicerie', 'Sucre'], ['Sucre en morceaux (paquet)', 'piece', 'Épicerie', 'Sucre'],
+    ['Sel', 'kilo', 'Épicerie', 'Sel'], ['Sel iodé (sachet)', 'piece', 'Épicerie', 'Sel'], ['Sel 25 kg', 'sac', 'Épicerie', 'Sel'],
+    ['Bouillon cube', 'piece', 'Épicerie', 'Bouillon'], ['Bouillon cube (boîte)', 'piece', 'Épicerie', 'Bouillon'], ['Bouillon en poudre (sachet)', 'piece', 'Épicerie', 'Bouillon'], ['Soumbala', 'piece', 'Épicerie', 'Bouillon'],
+    ['Poivre', 'piece', 'Épicerie', 'Épices et sauces'], ['Piment en poudre', 'piece', 'Épicerie', 'Épices et sauces'], ['Ail en poudre', 'piece', 'Épicerie', 'Épices et sauces'], ['Gingembre en poudre', 'piece', 'Épicerie', 'Épices et sauces'], ['Mayonnaise', 'piece', 'Épicerie', 'Épices et sauces'], ['Moutarde', 'piece', 'Épicerie', 'Épices et sauces'], ['Vinaigre', 'piece', 'Épicerie', 'Épices et sauces'], ['Ketchup', 'piece', 'Épicerie', 'Épices et sauces'], ["Pâte d'arachide", 'kilo', 'Épicerie', 'Épices et sauces'], ['Levure', 'piece', 'Épicerie', 'Épices et sauces'],
+    ['Café soluble (sachet)', 'piece', 'Épicerie', 'Café et thé'], ['Café soluble (boîte)', 'piece', 'Épicerie', 'Café et thé'], ['Thé vert (paquet)', 'piece', 'Épicerie', 'Café et thé'], ['Thé en sachets (boîte)', 'piece', 'Épicerie', 'Café et thé'], ['Cacao en poudre', 'piece', 'Épicerie', 'Café et thé'], ['Chocolat à tartiner', 'piece', 'Épicerie', 'Café et thé'], ['Kinkéliba', 'piece', 'Épicerie', 'Café et thé'],
+    ['Lait en poudre (sachet)', 'piece', 'Épicerie', 'Lait en poudre'], ['Lait en poudre (boîte 400 g)', 'piece', 'Épicerie', 'Lait en poudre'], ['Lait en poudre (boîte 2,5 kg)', 'piece', 'Épicerie', 'Lait en poudre'], ['Lait en poudre 25 kg', 'sac', 'Épicerie', 'Lait en poudre'], ['Lait concentré sucré', 'piece', 'Épicerie', 'Lait en poudre'], ['Lait concentré non sucré', 'piece', 'Épicerie', 'Lait en poudre'],
+    ['Lait pour bébé', 'piece', 'Épicerie', 'Bébé'], ['Farine pour bébé', 'piece', 'Épicerie', 'Bébé'], ['Bouillie (sachet)', 'piece', 'Épicerie', 'Bébé'],
+    ['Biscuits secs (sachet)', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits secs (paquet)', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits (carton)', 'carton', 'Épicerie', 'Biscuits'], ['Biscuits petit-beurre', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits au lait', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits glucose', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits à la noix de coco', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits au chocolat', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits fourrés chocolat', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits fourrés fraise', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits fourrés vanille', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits fourrés ananas', 'piece', 'Épicerie', 'Biscuits'], ['Biscuits salés (crackers)', 'piece', 'Épicerie', 'Biscuits'], ['Gaufrettes chocolat', 'piece', 'Épicerie', 'Biscuits'], ['Gaufrettes vanille', 'piece', 'Épicerie', 'Biscuits'], ['Gaufrettes fraise', 'piece', 'Épicerie', 'Biscuits'], ['Cookies', 'piece', 'Épicerie', 'Biscuits'], ['Madeleines', 'piece', 'Épicerie', 'Biscuits'], ['Cake', 'piece', 'Épicerie', 'Biscuits'], ['Croissants (sachet)', 'piece', 'Épicerie', 'Biscuits'], ["Pain d'épices", 'piece', 'Épicerie', 'Biscuits'],
+    ['Bonbons à la menthe', 'piece', 'Épicerie', 'Bonbons'], ['Bonbons au lait', 'piece', 'Épicerie', 'Bonbons'], ['Bonbons aux fruits', 'piece', 'Épicerie', 'Bonbons'], ['Bonbons (paquet)', 'piece', 'Épicerie', 'Bonbons'], ['Sucettes', 'piece', 'Épicerie', 'Bonbons'], ['Chewing-gum', 'piece', 'Épicerie', 'Bonbons'], ['Chocolat en barre', 'piece', 'Épicerie', 'Bonbons'], ['Chocolat (tablette)', 'piece', 'Épicerie', 'Bonbons'],
+    ['Chips', 'piece', 'Épicerie', 'Snacks'], ['Arachides grillées (sachet)', 'piece', 'Épicerie', 'Snacks'], ['Galettes', 'piece', 'Épicerie', 'Snacks'], ['Pop-corn (sachet)', 'piece', 'Épicerie', 'Snacks'],
+    ['Huile 1 L', 'piece', 'Huiles', 'Huile'], ['Huile 5 L', 'piece', 'Huiles', 'Huile'], ['Huile 20 L', 'piece', 'Huiles', 'Huile'], ['Huile au litre', 'litre', 'Huiles', 'Huile'], ["Huile d'arachide 1 L", 'piece', 'Huiles', 'Huile'], ['Huile de palme rouge', 'litre', 'Huiles', 'Huile'], ['Huile de coton 20 L', 'piece', 'Huiles', 'Huile'],
+    ['Beurre de karité', 'kilo', 'Huiles', 'Beurre'], ['Beurre', 'piece', 'Huiles', 'Beurre'],
+    ['Margarine (pot)', 'piece', 'Huiles', 'Margarine'], ['Margarine (petit pot)', 'piece', 'Huiles', 'Margarine'],
+    ['Lait frais (sachet)', 'piece', 'Lait et boissons', 'Lait'], ['Yaourt', 'piece', 'Lait et boissons', 'Lait'], ['Lait caillé (sachet)', 'piece', 'Lait et boissons', 'Lait'], ['Fromage (portions)', 'piece', 'Lait et boissons', 'Lait'],
+    ['Eau minérale 0,5 L', 'piece', 'Lait et boissons', 'Eau'], ['Eau minérale 1,5 L', 'piece', 'Lait et boissons', 'Eau'], ['Eau minérale (pack)', 'carton', 'Lait et boissons', 'Eau'], ['Eau en sachet', 'piece', 'Lait et boissons', 'Eau'], ['Eau en sachet (paquet)', 'piece', 'Lait et boissons', 'Eau'],
+    ['Sucrerie 33 cl (canette)', 'piece', 'Lait et boissons', 'Sucreries'], ['Sucrerie 30 cl (bouteille)', 'piece', 'Lait et boissons', 'Sucreries'], ['Sucrerie 1,5 L', 'piece', 'Lait et boissons', 'Sucreries'], ['Sucrerie (casier)', 'carton', 'Lait et boissons', 'Sucreries'], ['Boisson énergisante', 'piece', 'Lait et boissons', 'Sucreries'], ['Boisson malt', 'piece', 'Lait et boissons', 'Sucreries'],
+    ['Jus de fruits 1 L', 'piece', 'Lait et boissons', 'Jus'], ['Jus de fruits (petite brique)', 'piece', 'Lait et boissons', 'Jus'], ['Jus en poudre (sachet)', 'piece', 'Lait et boissons', 'Jus'], ['Jus de bissap', 'piece', 'Lait et boissons', 'Jus'], ['Jus de gingembre', 'piece', 'Lait et boissons', 'Jus'], ['Sirop', 'piece', 'Lait et boissons', 'Jus'],
+    ['Tomate concentrée (sachet)', 'piece', 'Conserves', 'Tomate'], ['Tomate concentrée (petite boîte)', 'piece', 'Conserves', 'Tomate'], ['Tomate concentrée (grande boîte)', 'piece', 'Conserves', 'Tomate'], ['Tomate concentrée (carton)', 'carton', 'Conserves', 'Tomate'],
+    ['Sardine', 'piece', 'Conserves', 'Poisson'], ['Sardine (carton)', 'carton', 'Conserves', 'Poisson'], ['Thon', 'piece', 'Conserves', 'Poisson'], ['Maquereau en boîte', 'piece', 'Conserves', 'Poisson'], ['Corned-beef', 'piece', 'Conserves', 'Poisson'],
+    ['Petits pois (boîte)', 'piece', 'Conserves', 'Légumes'], ['Haricots verts (boîte)', 'piece', 'Conserves', 'Légumes'], ['Maïs doux (boîte)', 'piece', 'Conserves', 'Légumes'], ['Champignons (boîte)', 'piece', 'Conserves', 'Légumes'],
+    ['Œufs (plaquette)', 'piece', 'Frais', 'Œufs'], ['Œuf', 'piece', 'Frais', 'Œufs'],
+    ['Pain', 'piece', 'Frais', 'Pain'], ['Pain de mie', 'piece', 'Frais', 'Pain'],
+    ['Oignons', 'kilo', 'Frais', 'Légumes'], ['Oignons (sac)', 'sac', 'Frais', 'Légumes'], ['Pomme de terre', 'kilo', 'Frais', 'Légumes'], ['Tomates fraîches', 'kilo', 'Frais', 'Légumes'], ['Piment frais', 'kilo', 'Frais', 'Légumes'], ['Ail', 'kilo', 'Frais', 'Légumes'], ['Gombo sec', 'kilo', 'Frais', 'Légumes'],
+    ['Bananes', 'piece', 'Frais', 'Fruits'], ['Oranges', 'piece', 'Frais', 'Fruits'], ['Pommes', 'piece', 'Frais', 'Fruits'], ['Mangues', 'piece', 'Frais', 'Fruits'],
+    ['Poisson fumé', 'kilo', 'Frais', 'Poisson'], ['Poisson séché', 'kilo', 'Frais', 'Poisson'],
+    ['Savon en morceau', 'piece', 'Entretien', 'Savon'], ['Savon (carton)', 'carton', 'Entretien', 'Savon'], ['Savon liquide', 'piece', 'Entretien', 'Savon'], ['Savon de ménage', 'piece', 'Entretien', 'Savon'],
+    ['Lessive en poudre (sachet)', 'piece', 'Entretien', 'Lessive'], ['Lessive en poudre (grand sac)', 'piece', 'Entretien', 'Lessive'], ['Lessive (carton)', 'carton', 'Entretien', 'Lessive'],
+    ['Eau de Javel', 'piece', 'Entretien', 'Javel'], ['Liquide vaisselle', 'piece', 'Entretien', 'Javel'],
+    ['Insecticide (aérosol)', 'piece', 'Entretien', 'Insecticide'], ['Spirale anti-moustique', 'piece', 'Entretien', 'Insecticide'], ['Raquette anti-moustique', 'piece', 'Entretien', 'Insecticide'],
+    ['Allumettes', 'piece', 'Entretien', 'Allumettes'], ['Allumettes (paquet)', 'piece', 'Entretien', 'Allumettes'], ['Briquet', 'piece', 'Entretien', 'Allumettes'],
+    ['Bougies', 'piece', 'Entretien', 'Maison'], ['Pétrole', 'litre', 'Entretien', 'Maison'], ['Charbon de bois', 'sac', 'Entretien', 'Maison'], ['Éponge', 'piece', 'Entretien', 'Maison'], ['Papier hygiénique', 'piece', 'Entretien', 'Maison'], ['Serviettes en papier', 'piece', 'Entretien', 'Maison'], ['Sachets plastiques (paquet)', 'piece', 'Entretien', 'Maison'], ['Piles', 'piece', 'Entretien', 'Maison'], ['Torche', 'piece', 'Entretien', 'Maison'],
   ]
 };
-const catItems = () => (CATALOG[S.shop.type] || []).map(([name, unit, category]) => ({ name, unit, category }));
+const catItems = () => (CATALOG[S.shop.type] || []).map(([name, unit, category, kind]) => ({ name, unit, category, kind: kind || '' }));
 const nameKey = n => String(n).trim().toLowerCase();
 const unitAu = u => (['piece', 'barre', 'paire'].includes(u) ? 'à la ' : 'au ') + UNITS[u];
 
@@ -2703,13 +2738,20 @@ function viewCatalog() {
   const items = catItems(), cats = [...new Set(items.map(x => x.category))];
   if (S.catCat && !cats.includes(S.catCat)) S.catCat = '';
   const t = (S.catQ || '').trim().toLowerCase();
-  const list = items.filter(x => (!S.catCat || x.category === S.catCat) && (!t || x.name.toLowerCase().includes(t)));
+  const kinds = S.catCat && !t ? [...new Set(items.filter(x => x.category === S.catCat && x.kind).map(x => x.kind))] : [];
+  if (!kinds.includes(S.catKind)) S.catKind = '';
+  const list = items.filter(x => (!S.catCat || x.category === S.catCat) && (!S.catKind || x.kind === S.catKind) && (!t || x.name.toLowerCase().includes(t)));
+  // Rangé par type, avec un titre (Biscuits, Bonbons…).
+  let lastK = null;
+  const head = x => { if (t || S.catKind || !x.kind || x.kind === lastK) return ''; lastK = x.kind;
+    return `<div style="grid-column:1/-1;font:700 15px var(--f-display);margin-top:6px">${KIND_IC[x.kind] || '📦'} ${esc(x.kind)}</div>`; };
   $('#view').innerHTML = `<div style="display:flex;align-items:center;gap:10px"><button class="btn ghost" id="cat-back" style="flex:0 0 auto">‹ Produits</button>
       <h2 style="flex:1 1 auto">Touchez vos produits</h2></div>
     <input id="cat-q" type="search" placeholder="🔍 Chercher dans la liste" value="${esc(S.catQ || '')}" autocomplete="off" style="height:50px;font-size:16px">
     <div class="chips" role="group" aria-label="Rayons"><button aria-pressed="${!S.catCat}" data-cc="">Tout</button>${cats.map(c => `<button aria-pressed="${S.catCat === c}" data-cc="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    ${kinds.length > 1 ? `<div class="chips" role="group" aria-label="Types" style="flex-wrap:wrap"><button aria-pressed="${!S.catKind}" data-ck="">Tous</button>${kinds.map(k => `<button aria-pressed="${S.catKind === k}" data-ck="${esc(k)}">${KIND_IC[k] || '📦'} ${esc(k)}</button>`).join('')}</div>` : ''}
     <div class="tiles">${list.map(x => { const k = nameKey(x.name), on = S.catPick.has(k), done = have.has(k);
-      return `<button class="tile${on ? ' in' : ''}" data-ci="${esc(k)}" ${done ? 'disabled' : ''} aria-pressed="${on}">
+      return `${head(x)}<button class="tile${on ? ' in' : ''}" data-ci="${esc(k)}" ${done ? 'disabled' : ''} aria-pressed="${on}">
         ${prodIcon(x, 58, 'margin:0 auto')}
         <span class="tn">${esc(x.name)}</span><span class="muted" style="font-size:12px">${done ? 'déjà ajouté' : esc(unitAu(x.unit))}</span>
         ${on ? '<span class="tq" aria-hidden="true">✓</span>' : ''}</button>`; }).join('') || '<p class="empty" style="grid-column:1/-1">Rien trouvé.</p>'}</div>
@@ -2720,7 +2762,8 @@ function viewCatalog() {
   $('#cat-back').onclick = () => { S.catMode = null; viewProducts(); };
   $('#cat-hand').onclick = () => openSheet('new');
   const q = $('#cat-q'); q.oninput = () => { S.catQ = q.value; const pos = q.selectionStart; viewCatalog(); const q2 = $('#cat-q'); q2.focus(); q2.setSelectionRange(pos, pos); };
-  document.querySelectorAll('[data-cc]').forEach(b => b.onclick = () => { S.catCat = b.dataset.cc; viewCatalog(); });
+  document.querySelectorAll('[data-cc]').forEach(b => b.onclick = () => { S.catCat = b.dataset.cc; S.catKind = ''; viewCatalog(); });
+  document.querySelectorAll('[data-ck]').forEach(b => b.onclick = () => { S.catKind = b.dataset.ck; viewCatalog(); });
   document.querySelectorAll('[data-ci]').forEach(b => b.onclick = () => {
     const k = b.dataset.ci;
     if (S.catPick.has(k)) S.catPick.delete(k); else S.catPick.set(k, { ...items.find(x => nameKey(x.name) === k), sell: '', buy: '', qty: '' });
@@ -2805,20 +2848,23 @@ async function saveCatalog() {
   if (bad) return toast('Complétez les cases en rouge.', true);
   if (warn && !S.catWarnOk) { S.catWarnOk = true; btn.textContent = 'Confirmer quand même'; return toast('Un prix de vente est plus bas que le prix d\'achat. Vérifiez, ou touchez « Confirmer quand même ».', true); }
   btn.disabled = true;
-  let ok = 0;
+  let ok = 0; const kinds = {};
   for (const [i, x] of rows.entries()) {
     btn.textContent = `Enregistrement ${i + 1} / ${rows.length}…`;
     const cb = combos(x), list = cb.length ? cb.map(l => ({ name: x.name + ' · ' + l, qty: Number((x.vq || {})[l] || 0) }))
       : [{ name: x.name, qty: x.qty === '' || x.qty == null ? 0 : Number(x.qty) }];
     let fail = null;
     for (const it of list) {
-      const { error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: it.name, p_category: x.category, p_unit: x.unit,
+      const { data: nid, error } = await sb.rpc('create_product', { p_shop: S.shop.id, p_name: it.name, p_category: x.category, p_unit: x.unit,
         p_buy_price: x.buy === '' || x.buy == null ? null : Math.round(Number(x.buy)), p_sell_price: Math.round(Number(x.sell)), p_initial_qty: it.qty, p_alert: 0, p_barcode: null });
       if (error) { fail = it.name + ' : ' + cleanErr(error); break; }
+      if (nid && x.kind) (kinds[x.kind] = kinds[x.kind] || []).push(nid);
     }
     if (fail) { $('#msg-' + i).innerHTML = `<div class="banner bad" style="margin:0">${esc(fail)}</div>`; continue; }
     S.catPick.delete(nameKey(x.name)); ok++;
   }
+  // Rangés tout de suite par type (Biscuits, Riz…) ; sans la mise à jour 018, le type est deviné d'après le nom.
+  for (const [k, ids] of Object.entries(kinds)) { try { await sb.rpc('set_product_tags', { p_products: ids, p_kind: k, p_brand: null }); } catch (e) {} }
   await loadProducts(); S.summary = null;
   if (!S.catPick.size) { S.catMode = null; S.catWarnOk = false; toast(`${ok} produit${ok > 1 ? 's' : ''} ajouté${ok > 1 ? 's' : ''} ✓`); return viewProducts(); }
   toast(`${ok} ajouté(s). Les autres ont un problème : voir en rouge.`, true);
