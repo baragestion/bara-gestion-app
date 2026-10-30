@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-29k';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-10-29l';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -861,7 +861,7 @@ async function myLockSheet() {
   const r = pinRec(), can = bioAllowed() && await bioAvailable();
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Mon compte">
     <h2>Mon compte</h2>
-    <div class="muted">${esc(whoLine())} · ${esc(S.shop.name)}</div>
+    <div class="muted">${S.shop ? esc(whoLine()) + ' · ' + esc(S.shop.name) : '👑 Administrateur'}</div>
     <p class="muted" style="margin:0;font-size:13.5px">L'application se verrouille après ${lockLabel()} sans utilisation, et à chaque ouverture.</p>
     <button class="btn" id="lk-now">🔒 Verrouiller maintenant</button>
     <button class="btn ghost" id="lk-change">Changer mon code</button>
@@ -932,14 +932,25 @@ function drawLogin(msg) {
       <label>Mot de passe<input id="password" type="password" autocomplete="current-password" required></label>
       ${msg ? `<div class="banner bad" role="alert">${esc(msg)}</div>` : ''}
       <button class="btn" id="login-btn" type="submit">Se connecter</button>
+      <button class="btn ghost" id="signup-btn" type="button" style="height:auto;padding:12px">🏪 Créer ma boutique<br><small style="font:400 12.5px var(--f-body)">30 jours gratuits</small></button>
       <p class="muted" style="text-align:center;font-size:12px;margin:0">Version ${APP_VERSION}</p>
     </form>`;
   $('#login-form').addEventListener('submit', async ev => {
     ev.preventDefault();
     const b = $('#login-btn'); b.disabled = true; b.textContent = 'Connexion…';
-    let login = $('#email').value.trim().toLowerCase();
-    if (!login.includes('@')) login += '@' + LOGIN_DOMAIN;   // identifiant court des employés
-    const { data, error } = await sb.auth.signInWithPassword({ email: login, password: $('#password').value });
+    await doLogin($('#email').value, $('#password').value);
+  });
+  $('#signup-btn').onclick = () => drawSignup({});
+}
+async function doLogin(raw, password) {
+  {
+    let login = String(raw || '').trim().toLowerCase();
+    // Numéro de téléphone (boutiques créées par « Créer ma boutique ») : seulement les chiffres.
+    if (/^\+?[0-9 ]{8,20}$/.test(login)) login = login.replace(/\D/g, '').replace(/^00/, '');
+    const tries = login.includes('@') ? [login] : [login + '@' + LOGIN_DOMAIN];
+    if (/^\d{8}$/.test(login)) tries.push('226' + login + '@' + LOGIN_DOMAIN);   // numéro tapé sans +226
+    let data, error;
+    for (const email of tries) { ({ data, error } = await sb.auth.signInWithPassword({ email, password })); if (!error) break; }
     if (error) return drawLogin(cleanErr(error));
     S.user = data.user;
     // Mot de passe juste : si ce compte a déjà son code sur ce téléphone, on le garde (pas besoin de le
@@ -947,7 +958,7 @@ function drawLogin(msg) {
     { const r = pinRec(); if (r) { r.fails = 0; savePinRec(r); } S.unlocked = !!r; S.pwOk = true; }
     try { await sb.rpc('claim_single_session'); } catch (e) {}   // vendeurs et gérants : un seul appareil à la fois
     await loadContext();
-  });
+  }
 }
 
 async function loadContext() {
@@ -972,7 +983,7 @@ async function loadContext() {
   S.memberships = (data || []).filter(m => m.shops);
   if (!S.memberships.length) {
     await loadAdmin();
-    if (S.isAdmin) return adminGate();
+    if (S.isAdmin) { adminGate(); gate(); return; }
     $('#app').innerHTML = `<div class="login"><div class="brand">Bara Gestion</div>
       <div class="banner">Ce compte n'est rattaché à aucune boutique. Demandez au propriétaire de vous ajouter.</div>
       <button class="btn ghost" id="out">Se déconnecter</button></div>`;
@@ -1063,16 +1074,16 @@ function subBanner() {
     return (s.status === 'read_only' || s.status === 'suspended')
       ? `<div class="banner bad">Les ventes sont bloquées pour le moment. Contactez le propriétaire de la boutique.</div>` : '';
   }
-  if (s.status === 'trial') return `<div class="banner ok">Essai gratuit : ${esc(s.days_left)} jour(s) restant(s).</div>`;
-  if (s.status === 'grace') return `<div class="banner">Abonnement expiré. Payez avant la fin du délai pour ne pas passer en lecture seule.</div>`;
-  if (s.status === 'read_only') return `<div class="banner bad">Abonnement expiré : lecture seule. Les ventes et le stock sont bloqués.</div>`;
+  if (s.status === 'trial') return `<div class="banner ok">Essai gratuit : ${esc(s.days_left)} jour(s) restant(s). <a href="#" class="sub-go">Abonnement ›</a></div>`;
+  if (s.status === 'grace') return `<div class="banner">Abonnement expiré. Payez avant la fin du délai pour ne pas passer en lecture seule. <a href="#" class="sub-go">Payer ›</a></div>`;
+  if (s.status === 'read_only') return `<div class="banner bad">Abonnement expiré : lecture seule. Les ventes et le stock sont bloqués. <a href="#" class="sub-go">Payer ›</a></div>`;
   if (s.status === 'suspended') return `<div class="banner bad">Boutique suspendue. Contactez Bara Gestion.</div>`;
-  if (s.status === 'active' && s.days_left <= 5) return `<div class="banner">Votre abonnement se termine dans ${esc(s.days_left)} jour(s).</div>`;
+  if (s.status === 'active' && s.days_left <= 5) return `<div class="banner">Votre abonnement se termine dans ${esc(s.days_left)} jour(s). <a href="#" class="sub-go">Payer ›</a></div>`;
   return '';
 }
 
 const TAB_IC = { home: '🏠', sale: '🛒', products: '📦', history: '🧾', clients: '👥', cash: '💰', report: '📊', team: '⚙️', more: '☰' };
-const MORE_TABS = ['history', 'cash', 'report', 'team', 'more'];
+const MORE_TABS = ['history', 'cash', 'report', 'team', 'more', 'sub'];
 function draw() {
   if (S.adminMode) return;          // espace administrateur ouvert : la boutique ne redessine pas par-dessus
   if (S.tab === 'count' && !isManager()) S.tab = 'products';
@@ -1102,6 +1113,7 @@ function draw() {
     <nav class="tabs" aria-label="Sections">${tabs.map(([k,l]) => `<button data-tab="${k}" ${cur(k) ? 'aria-current="page"' : ''}><span class="ic" aria-hidden="true">${TAB_IC[k] || ''}</span><span>${l}</span></button>`).join('')}</nav>
     <div id="sheet-host"></div>`;
   $('#lockb').onclick = myLockSheet;
+  document.querySelectorAll('.sub-go').forEach(a => a.onclick = ev => { ev.preventDefault(); go('sub'); });
   const cb = $('#cashb'); if (cb) cb.onclick = () => go('cash');
   const ct = $('#cartb'); if (ct) ct.onclick = () => { stopScan(); S.tab = 'sale'; if (S.cart.size) S.payOpen = true; draw(); window.scrollTo(0, 0); };
   const bl = $('#bell'); if (bl) bl.onclick = alertsSheet;
@@ -1111,7 +1123,7 @@ function draw() {
   goView(S.tab);
 }
 function goView(t) {
-  ({ home: viewHome, more: viewMore, sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash, clients: viewClients })[t]();
+  ({ sub: viewSub, home: viewHome, more: viewMore, sale: viewSale, products: viewProducts, history: viewHistory, report: viewReport, team: viewTeam, count: viewCount, cash: viewCash, clients: viewClients })[t]();
 }
 function go(t) { stopScan(); S.tab = t; draw(); window.scrollTo(0, 0); }
 
@@ -1159,6 +1171,7 @@ function viewMore() {
     ${T('cash', '💰', 'Caisse', 'ouvrir, dépenses, fermer')}
     ${T('report', '📊', 'Bilan', 'chiffres, marge, dépenses')}
     ${S.role === 'owner' ? T('team', '⚙️', 'Équipe et réglages', 'employés, droits, sécurité') : ''}
+    ${S.role === 'owner' && !S.offline ? T('sub', '💳', 'Abonnement', S.sub && S.sub.days_left != null && S.sub.days_left >= 0 ? S.sub.days_left + ' jours restants' : 'payer, reçus') : ''}
     ${S.isAdmin && !S.offline ? T('admin', '👑', 'Administration', 'boutiques, paiements') : ''}
     <button class="htile" id="guide" style="min-height:120px"><span class="hic" aria-hidden="true" style="background:var(--accent-soft)">👋</span><span class="hl">Guide</span><span class="muted" style="font-size:12.5px;font-weight:400">comment ça marche</span></button>
   </div>`;
@@ -1167,18 +1180,21 @@ function viewMore() {
 }
 
 /* ===== 👑 Espace administrateur (propriétaire du projet seulement) =====
-   Double authentification obligatoire : la base refuse tout sans le code à 6 chiffres.
+   Rangé en 4 onglets : Accueil · Boutiques · Paiements · Réglages.
+   Double authentification obligatoire (la base refuse tout sans le code Google Authenticator),
+   et le code d'accès de l'appareil (PIN) comme pour les boutiques.
    L'administrateur ne voit jamais les ventes, le stock ni les clients : seulement les boutiques
-   (nom, métier, contact) et leur abonnement. */
+   (nom, métier, contact, date de dernière activité) et leur abonnement. */
 const SHOP_TYPES = { alimentation: ['🛒', 'Alimentation'], vetements: ['👕', 'Vêtements'], telephones: ['📱', 'Téléphones'],
   cosmetiques: ['💄', 'Cosmétiques'], pieces: ['🏍️', 'Pièces moto'], materiaux: ['🧱', 'Quincaillerie'] };
 const ADM_ST = { trial: ['🆓', 'Essai', 'var(--accent)'], active: ['🟢', 'Active', 'var(--ok, #1f7a4d)'], grace: ['🟠', '7 jours de grâce', 'var(--warn)'],
   read_only: ['🔴', 'Expirée (lecture seule)', 'var(--bad)'], suspended: ['⏸️', 'Suspendue', 'var(--bad)'] };
 const PAY_M = { orange_money: '🟠 Orange Money', moov_money: '🔵 Moov Money', cash: '💵 Espèces', other: 'Autre' };
-const PRICE = 20000;
-const admDay = s => new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-const waLink = (tel, txt) => 'https://wa.me/' + String(tel || '').replace(/[^\d]/g, '') + '?text=' + encodeURIComponent(txt);
+const admDay = s => s ? new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+const waLink = (tel, txt) => 'https://wa.me/' + String(tel || '').replace(/[^\d]/g, '').replace(/^00/, '') + '?text=' + encodeURIComponent(txt);
 const isMfaErr = e => /double authentification|BG010/i.test((e && (e.message || e.code)) || '');
+const agoDays = s => s ? Math.floor((Date.now() - new Date(s).getTime()) / 864e5) : null;
+const priceFor = (m, set) => (set || S.admSet || {})['price_' + m] || 20000 * m;
 
 async function loadAdmin() {
   S.isAdmin = false;
@@ -1191,7 +1207,7 @@ async function admCall(body) {
   if (error) {
     let msg = cleanErr(error);
     try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) {}
-    if (/Failed to send|non-2xx|not found|404/i.test(msg)) msg = 'La fonction « admin-shops » n\'est pas encore installée dans Supabase.';
+    if (/Failed to send|non-2xx|not found|404/i.test(msg)) msg = 'La fonction « Admin-shops » ne répond pas. Vérifiez qu\'elle est installée dans Supabase.';
     throw new Error(msg);
   }
   if (data && data.error) throw new Error(data.error);
@@ -1200,27 +1216,33 @@ async function admCall(body) {
 async function admRpc(name, args) {
   const r = await sb.rpc(name, args || {});
   if (r.error && isMfaErr(r.error)) { adminGate(); throw new Error('Double authentification requise'); }
-  if (r.error && /admin_|function .* does not exist|schema cache/i.test(r.error.message || '')) throw new Error('Installez d\'abord la mise à jour 019 dans Supabase.');
+  if (r.error && /function .* does not exist|schema cache|Could not find the function/i.test(r.error.message || '')) throw new Error('Installez d\'abord la dernière mise à jour de la base (020) dans Supabase.');
   if (r.error) throw new Error(cleanErr(r.error));
   return r.data;
 }
-function admShell(inner) {
+const ADM_TABS = [['home', '🏠', 'Accueil'], ['shops', '🏪', 'Boutiques'], ['pay', '💰', 'Paiements'], ['set', '⚙️', 'Réglages']];
+function admShell(inner, withTabs) {
   S.adminMode = true; stopScan();
-  $('#app').innerHTML = `<header class="top" style="display:flex;align-items:center;gap:8px;padding:10px 14px">
-      <div style="flex:1 1 auto;min-width:0"><b style="font:800 18px var(--f-display)">👑 Administration</b><br><span class="muted" style="font-size:12.5px">Bara Gestion</span></div>
+  const n = S.admD ? S.admD.pending_requests : 0;
+  $('#app').innerHTML = `<header class="top"><div class="top-row">
+      <div style="min-width:0;flex:1 1 auto"><div class="shopname">👑 Administration</div><div class="who">Bara Gestion</div></div>
       ${S.memberships && S.memberships.length ? '<button class="btn ghost small" id="adm-shop" style="flex:0 0 auto">‹ Ma boutique</button>' : ''}
-      <button class="btn ghost small" id="adm-out" style="flex:0 0 auto" aria-label="Se déconnecter">🚪</button></header>
-    <main id="view" class="stack" style="padding:14px;gap:12px;max-width:720px;margin:0 auto">${inner}</main><div id="sheet-host"></div>`;
+      <button class="btn ghost small" id="adm-me" aria-label="Mon compte : verrouiller, code, quitter" style="flex:0 0 auto;font-size:18px;padding:6px 12px">👤</button></div></header>
+    <main id="view">${inner}</main>
+    ${withTabs ? `<nav class="tabs" aria-label="Sections">${ADM_TABS.map(([k, i, l]) => `<button data-at="${k}" ${S.admTab === k ? 'aria-current="page"' : ''}><span class="ic" aria-hidden="true">${i}</span><span>${l}${k === 'pay' && n ? ` <b style="color:var(--bad)">(${n})</b>` : ''}</span></button>`).join('')}</nav>` : ''}
+    <div id="sheet-host"></div>`;
   const b = $('#adm-shop'); if (b) b.onclick = () => { S.adminMode = false; S.tab = 'more'; draw(); };
-  $('#adm-out').onclick = () => leave();
+  $('#adm-me').onclick = myLockSheet;
+  document.querySelectorAll('[data-at]').forEach(x => x.onclick = () => admGo(x.dataset.at));
 }
+function admGo(t) { S.admTab = t; window.scrollTo(0, 0); adminView(); }
 
-// Étape 1 : le code à 6 chiffres (ou sa mise en place, la première fois).
+// Le code à 6 chiffres de Google Authenticator (ou sa mise en place, la première fois).
 async function adminGate() {
   admShell('<p class="empty">Chargement…</p>');
   try {
     const { data: lv } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (lv && lv.currentLevel === 'aal2') return adminHome();
+    if (lv && lv.currentLevel === 'aal2') return adminView();
     const { data: f, error } = await sb.auth.mfa.listFactors();
     if (error) throw error;
     const ok = (f.totp || []).find(x => x.status === 'verified');
@@ -1254,99 +1276,182 @@ function mfaCode(factorId, totp) {
     $('#mfa-ok').disabled = true;
     const { error } = await sb.auth.mfa.challengeAndVerify({ factorId, code });
     if (error) { $('#mfa-ok').disabled = false; $('#mfa-code').value = ''; return toast(/invalid|expired/i.test(error.message || '') ? 'Code faux ou trop ancien : tapez le nouveau code.' : cleanErr(error), true); }
-    toast('Bienvenue 👑'); adminHome();
+    toast('Bienvenue 👑'); S.admTab = 'home'; adminView();
   };
   $('#mfa-ok').onclick = go;
   $('#mfa-code').oninput = ev => { if (ev.target.value.replace(/\D/g, '').length === 6) go(); };
-  $('#mfa-code').focus();
 }
 
-// Étape 2 : tableau de bord + liste des boutiques.
-async function adminHome() {
-  admShell('<p class="empty">Chargement…</p>');
-  let d, shops;
-  try { [d, shops] = await Promise.all([admRpc('admin_dashboard'), admRpc('admin_shops')]); }
-  catch (e) { if (!isMfaErr(e)) $('#view').innerHTML = `<div class="banner bad">${esc(e.message)}</div><button class="btn" id="adm-retry">Réessayer</button>`;
-    const r = $('#adm-retry'); if (r) r.onclick = adminHome; return; }
-  S.adm = { shops: shops || [], d, f: S.adm ? S.adm.f : '', q: S.adm ? S.adm.q : '' };
-  const remind = s => s.status === 'grace' || (['trial', 'active'].includes(s.status) && s.days_left <= 7);
-  const F = { '': ['Toutes', () => true], remind: ['🟠 À relancer', remind], trial: ['🆓 Essai', s => s.status === 'trial'], active: ['🟢 Actives', s => s.status === 'active'],
-    expired: ['🔴 Expirées', s => s.status === 'read_only' || s.status === 'grace'], suspended: ['⏸️ Suspendues', s => s.status === 'suspended'] };
-  const T = (k, n, l, c) => `<button class="metric" data-af="${k}" style="text-align:left;cursor:pointer;${S.adm.f === k ? 'outline:2px solid var(--accent)' : ''}"><span>${l}</span><b style="color:${c || 'inherit'}">${n}</b></button>`;
-  $('#view').innerHTML = `<section class="hero"><div style="opacity:.85;font-size:14px">Revenus de ce mois</div>
+// Recharge les données puis affiche l'onglet courant.
+async function adminLoad() {
+  const [d, shops, set] = await Promise.all([admRpc('admin_dashboard'), admRpc('admin_shops'), admRpc('admin_settings')]);
+  S.admD = d; S.admShops = shops || []; S.admSet = set || {};
+}
+async function adminView(reload = true) {
+  S.admTab = S.admTab || 'home';
+  admShell('<p class="empty">Chargement…</p>', true);
+  try { if (reload || !S.admD) await adminLoad(); }
+  catch (e) { if (!isMfaErr(e)) { $('#view').innerHTML = `<div class="banner bad">${esc(e.message)}</div><button class="btn" id="adm-retry">Réessayer</button>`; $('#adm-retry').onclick = () => adminView(); } return; }
+  admShell('', true);
+  ({ home: admHome, shops: admShops, pay: admPayTab, set: admSettings })[S.admTab]();
+}
+
+/* --- 🏠 Accueil --- */
+function admHome() {
+  const d = S.admD, set = S.admSet;
+  const T = (f, n, l, c) => `<button class="metric" data-af="${f}" style="text-align:left;cursor:pointer"><span>${l}</span><b style="color:${n && c ? c : 'inherit'}">${n}</b></button>`;
+  $('#view').innerHTML = `
+    ${d.pending_requests ? `<button class="banner bad" id="h-req" style="border:0;width:100%;text-align:left;font-weight:700;font-size:16px;cursor:pointer;margin:0">⏳ ${d.pending_requests} paiement${d.pending_requests > 1 ? 's' : ''} à vérifier ›</button>` : ''}
+    ${!set.om_number && !set.moov_number ? '<button class="banner" id="h-set" style="border:0;width:100%;text-align:left;cursor:pointer;margin:0">📱 Ajoutez vos numéros Orange Money / Moov Money dans Réglages : les boutiques en ont besoin pour payer ›</button>' : ''}
+    <section class="hero"><div style="opacity:.85;font-size:14px">Revenus de ce mois</div>
       <div class="hero-n">${esc(money(d.month_revenue))}</div>
       <div class="hero-s"><span>🧾 ${d.month_payments} paiement${d.month_payments > 1 ? 's' : ''}</span><span>Depuis le début : ${esc(money(d.total_revenue))}</span></div></section>
     <div class="grid2" style="grid-template-columns:repeat(3,minmax(0,1fr))">
       ${T('', d.shops, '🏪 Boutiques')}${T('active', d.active, '🟢 Actives')}${T('trial', d.trial, '🆓 Essai')}
-      ${T('remind', d.to_remind, '🟠 À relancer', d.to_remind ? 'var(--warn)' : '')}${T('expired', d.read_only + d.grace, '🔴 Expirées', d.read_only + d.grace ? 'var(--bad)' : '')}${T('suspended', d.suspended, '⏸️ Suspendues')}</div>
-    <button class="btn huge" id="adm-new">＋ Nouvelle boutique</button>
-    <div class="row"><button class="btn ghost" id="adm-journal">📜 Journal</button><button class="btn ghost" id="adm-help">❓ Aide</button></div>
-    <input id="adm-q" type="search" placeholder="🔍 Chercher une boutique ou un propriétaire" value="${esc(S.adm.q)}" style="height:50px;font-size:16px">
-    <div class="muted" style="font-weight:700;font-size:13px">${esc(F[S.adm.f][0])}</div>
+      ${T('remind', d.to_remind, '🟠 À relancer', 'var(--warn)')}${T('expired', d.read_only + d.grace, '🔴 Expirées', 'var(--bad)')}${T('suspended', d.suspended, '⏸️ Suspendues', 'var(--bad)')}
+      ${T('idle', d.inactive, '😴 Inactives', 'var(--warn)')}${T('new', d.new_week, '🆕 Nouvelles (7 j)', 'var(--accent)')}${T('', '', '')}</div>
+    <button class="btn huge" id="h-new">＋ Nouvelle boutique</button>`;
+  const lastT = $('#view .grid2').lastElementChild; if (lastT) lastT.style.visibility = 'hidden';
+  document.querySelectorAll('[data-af]').forEach(b => b.onclick = () => { S.admF = b.dataset.af; admGo('shops'); });
+  const r = $('#h-req'); if (r) r.onclick = () => admGo('pay');
+  const st = $('#h-set'); if (st) st.onclick = () => admGo('set');
+  $('#h-new').onclick = () => adminNewShop({});
+}
+
+/* --- 🏪 Boutiques --- */
+const ADM_F = () => { const idle = S.admD.inactive_days || 14;
+  return { '': ['Toutes', () => true],
+    remind: ['🟠 À relancer', s => s.status === 'grace' || (['trial', 'active'].includes(s.status) && s.days_left <= 7)],
+    trial: ['🆓 Essai', s => s.status === 'trial'], active: ['🟢 Actives', s => s.status === 'active'],
+    expired: ['🔴 Expirées', s => s.status === 'read_only' || s.status === 'grace'], suspended: ['⏸️ Suspendues', s => s.status === 'suspended'],
+    idle: ['😴 Inactives', s => s.status !== 'suspended' && agoDays(s.created_at) >= idle && agoDays(s.last_activity_at || s.created_at) >= idle],
+    new: ['🆕 Nouvelles', s => agoDays(s.created_at) < 7] }; };
+function actLine(s) {
+  const a = agoDays(s.last_activity_at);
+  return a === null ? 'jamais utilisée' : a === 0 ? 'utilisée aujourd\'hui' : `utilisée il y a ${a} j`;
+}
+function admShops() {
+  const F = ADM_F(); if (!F[S.admF || '']) S.admF = '';
+  $('#view').innerHTML = `<button class="btn huge" id="s-new">＋ Nouvelle boutique</button>
+    <input id="adm-q" type="search" placeholder="🔍 Chercher une boutique, un nom, un numéro" value="${esc(S.admQ || '')}" style="height:50px;font-size:16px">
+    <div class="chips" role="group" aria-label="Filtre" style="flex-wrap:wrap">${Object.entries(F).map(([k, [l, f]]) => `<button data-sf="${k}" aria-pressed="${(S.admF || '') === k}">${l} (${S.admShops.filter(f).length})</button>`).join('')}</div>
     <div class="plist" id="adm-list"></div>`;
   const list = () => {
-    const t = S.adm.q.trim().toLowerCase();
-    const l = S.adm.shops.filter(F[S.adm.f][1]).filter(s => !t || (s.name + ' ' + (s.owner_name || '') + ' ' + (s.owner_phone || '')).toLowerCase().includes(t));
+    const t = (S.admQ || '').trim().toLowerCase(), digits = t.replace(/\D/g, '');
+    const l = S.admShops.filter(F[S.admF || ''][1]).filter(s => !t || (s.name + ' ' + (s.owner_name || '')).toLowerCase().includes(t) || (digits.length >= 3 && String(s.owner_phone || '').replace(/\D/g, '').includes(digits)));
     $('#adm-list').innerHTML = l.map(s => { const [ic, lab, col] = ADM_ST[s.status] || ['', s.status, ''];
       const left = s.status === 'suspended' ? 'suspendue' : s.days_left >= 0 ? `${s.days_left} j restant${s.days_left > 1 ? 's' : ''}` : `finie depuis ${-s.days_left} j`;
       return `<button class="prow" data-as="${esc(s.shop_id)}"><span style="font-size:30px;flex:0 0 auto" aria-hidden="true">${(SHOP_TYPES[s.shop_type] || ['🏪'])[0]}</span>
-        <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(s.name)}</span><br><span class="sub">${esc(s.owner_name || '')}${s.owner_phone ? ' · ' + esc(s.owner_phone) : ''}</span></span>
+        <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(s.name)}${s.pending_requests ? ' <b style="color:var(--bad)">⏳</b>' : ''}</span><br>
+          <span class="sub">${esc(s.owner_name || '')} · ${esc(actLine(s))}</span></span>
         <span style="text-align:right;flex:0 0 auto"><b style="color:${col};font-size:14px">${ic} ${esc(lab.split(' (')[0])}</b><br><span class="sub">${esc(left)}</span></span></button>`; }).join('')
       || '<p class="empty">Aucune boutique.</p>';
     document.querySelectorAll('[data-as]').forEach(b => b.onclick = () => adminShopSheet(b.dataset.as));
   };
   list();
-  $('#adm-q').oninput = ev => { S.adm.q = ev.target.value; list(); };
-  document.querySelectorAll('[data-af]').forEach(b => b.onclick = () => { S.adm.f = S.adm.f === b.dataset.af ? '' : b.dataset.af; adminHome(); });
-  $('#adm-new').onclick = () => adminNewShop({});
-  $('#adm-journal').onclick = adminJournal;
-  $('#adm-help').onclick = adminHelp;
+  $('#adm-q').oninput = ev => { S.admQ = ev.target.value; list(); };
+  document.querySelectorAll('[data-sf]').forEach(b => b.onclick = () => { S.admF = b.dataset.sf; admShops(); });
+  $('#s-new').onclick = () => adminNewShop({});
 }
 function admSheet(html) {
   $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog">${html}</div></div>`;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   const c = $('#cancel'); if (c) c.onclick = closeSheet;
 }
-const admShop = id => (S.adm.shops || []).find(s => s.shop_id === id);
-
-function remindText(s) {
-  const who = s.owner_name ? 'Bonjour ' + s.owner_name : 'Bonjour';
-  const end = admDay(s.ends_at);
-  if (s.status === 'trial') return `${who}, votre essai gratuit de Bara Gestion (${s.name}) se termine le ${end}.\nPour continuer : ${fmtNum.format(PRICE)} FCFA par mois (Orange Money ou Moov Money).\nMerci !`;
-  if (s.status === 'active') return `${who}, votre abonnement Bara Gestion (${s.name}) se termine le ${end}.\nPour continuer : ${fmtNum.format(PRICE)} FCFA par mois (Orange Money ou Moov Money).\nMerci !`;
-  if (s.status === 'grace') return `${who}, votre abonnement Bara Gestion (${s.name}) est terminé depuis le ${end}.\nVous pouvez encore vendre quelques jours. Ensuite, l'application passera en lecture seule.\nPour continuer : ${fmtNum.format(PRICE)} FCFA par mois. Merci !`;
-  return `${who}, votre abonnement Bara Gestion (${s.name}) est terminé depuis le ${end} : l'application est en lecture seule (vos données sont gardées).\nDès le paiement de ${fmtNum.format(PRICE)} FCFA, tout revient tout de suite. Merci !`;
+const admShop = id => (S.admShops || []).find(s => s.shop_id === id);
+function payHow() {
+  const s = S.admSet || {};
+  return [s.om_number ? `Orange Money : ${s.om_number}` : '', s.moov_number ? `Moov Money : ${s.moov_number}` : ''].filter(Boolean).join('\n')
+    + (s.pay_name ? `\n(au nom de ${s.pay_name})` : '');
 }
-
+function remindText(s) {
+  const who = s.owner_name ? 'Bonjour ' + s.owner_name : 'Bonjour', end = admDay(s.ends_at), how = payHow();
+  const tail = `\nPrix : ${fmtNum.format(priceFor(1))} FCFA (1 mois), ${fmtNum.format(priceFor(3))} FCFA (3 mois), ${fmtNum.format(priceFor(12))} FCFA (12 mois).`
+    + (how ? `\nPayez à :\n${how}\nPuis dans l'application : Plus → Abonnement → « J'ai payé ».` : '') + '\nMerci !';
+  if (s.status === 'trial') return `${who}, votre essai gratuit de Bara Gestion (${s.name}) se termine le ${end}.${tail}`;
+  if (s.status === 'active') return `${who}, votre abonnement Bara Gestion (${s.name}) se termine le ${end}.${tail}`;
+  if (s.status === 'grace') return `${who}, votre abonnement Bara Gestion (${s.name}) est terminé depuis le ${end}. Vous pouvez encore vendre quelques jours, ensuite l'application passera en lecture seule.${tail}`;
+  return `${who}, votre abonnement Bara Gestion (${s.name}) est terminé depuis le ${end} : l'application est en lecture seule (vos données sont gardées). Dès le paiement, tout revient tout de suite.${tail}`;
+}
+function idleText(s) {
+  return `Bonjour ${s.owner_name || ''}, ici Bara Gestion. Nous voyons que ${s.name} n'utilise plus l'application. Avez-vous un problème ? Nous pouvons vous aider. Merci !`;
+}
 function adminShopSheet(id) {
   const s = admShop(id); if (!s) return;
   const [ic, lab, col] = ADM_ST[s.status] || ['', s.status, ''];
   const [ti, tl] = SHOP_TYPES[s.shop_type] || ['🏪', s.shop_type];
+  const idle = agoDays(s.last_activity_at || s.created_at) >= (S.admD.inactive_days || 14);
   admSheet(`<h2>${ti} ${esc(s.name)}</h2>
-    <div class="muted">${esc(tl)} · créée le ${admDay(s.created_at)}</div>
+    <div class="muted">${esc(tl)} · créée le ${admDay(s.created_at)}${s.self_signup ? ' (inscription libre)' : ''}</div>
     <div class="grid2">
       <div class="metric"><span>Statut</span><b style="color:${col};font-size:16px">${ic} ${esc(lab)}</b></div>
       <div class="metric"><span>${s.status === 'trial' ? 'Fin de l\'essai' : 'Payé jusqu\'au'}</span><b style="font-size:16px">${admDay(s.ends_at)}</b></div>
       <div class="metric"><span>Propriétaire</span><b style="font-size:16px">${esc(s.owner_name || '—')}</b></div>
-      <div class="metric"><span>Total payé</span><b style="font-size:16px">${esc(money(s.paid_total))}</b></div></div>
+      <div class="metric"><span>Total payé</span><b style="font-size:16px">${esc(money(s.paid_total))}</b></div>
+      <div class="metric" style="grid-column:1/-1"><span>Dernière activité</span><b style="font-size:16px;color:${idle ? 'var(--warn)' : 'inherit'}">${idle ? '😴 ' : ''}${esc(actLine(s))}</b></div></div>
     ${s.owner_phone ? `<div class="muted">📞 ${esc(s.owner_phone)}</div>` : '<div class="banner" style="margin:0">Pas de numéro : ajoutez-le pour les rappels WhatsApp.</div>'}
     ${s.note ? `<div class="banner" style="margin:0">📝 ${esc(s.note)}</div>` : ''}
     ${s.suspended && s.suspend_reason ? `<div class="banner bad" style="margin:0">Motif : ${esc(s.suspend_reason)}</div>` : ''}
+    ${s.pending_requests ? `<button class="btn huge" id="as-req" style="background:var(--warn)">⏳ ${s.pending_requests} paiement(s) à vérifier</button>` : ''}
     <button class="btn huge" id="as-pay">💰 Enregistrer un paiement</button>
-    ${s.owner_phone ? `<a class="btn" id="as-wa" href="${esc(waLink(s.owner_phone, remindText(s)))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Rappel WhatsApp</a>` : ''}
-    <div class="row"><button class="btn ghost" id="as-pays">🧾 Paiements</button><button class="btn ghost" id="as-contact">📞 Contact et note</button></div>
+    ${s.owner_phone ? `<a class="btn" href="${esc(waLink(s.owner_phone, remindText(s)))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Rappel de paiement</a>
+      ${idle ? `<a class="btn ghost" href="${esc(waLink(s.owner_phone, idleText(s)))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Demander s'il a un problème</a>` : ''}` : ''}
+    <div class="row"><button class="btn ghost" id="as-pays">🧾 Reçus</button><button class="btn ghost" id="as-contact">📞 Contact et note</button></div>
     <div class="row"><button class="btn ghost" id="as-pw">🔑 Mot de passe</button>
-      <button class="btn ghost" id="as-susp" style="color:${s.suspended ? 'inherit' : 'var(--bad)'}">${s.suspended ? '▶️ Réactiver' : '⏸️ Suspendre'}</button></div>
+      <button class="btn ghost" id="as-susp" style="color:${s.suspended ? 'inherit' : 'var(--bad)'}">${s.suspended ? '▶️ Réactiver' : '⏸️ Désactiver'}</button></div>
     <button class="btn ghost" id="cancel">Fermer</button>`);
+  const rq = $('#as-req'); if (rq) rq.onclick = () => { closeSheet(); admGo('pay'); };
   $('#as-pay').onclick = () => adminPay(s);
   $('#as-pays').onclick = () => adminPayments(s);
   $('#as-contact').onclick = () => adminContact(s);
   $('#as-pw').onclick = () => adminPassword(s);
-  $('#as-susp').onclick = () => adminSuspend(s);
+  $('#as-susp').onclick = () => adminSuspend(s, idle);
 }
 
+/* --- 💰 Paiements : à vérifier + tous les reçus --- */
+async function admPayTab() {
+  $('#view').innerHTML = '<p class="empty">Chargement…</p>';
+  let req, pays;
+  try { [req, pays] = await Promise.all([admRpc('admin_payment_requests'), admRpc('admin_payments', { p_shop: null, p_limit: 200 })]); }
+  catch (e) { $('#view').innerHTML = `<div class="banner bad">${esc(e.message)}</div>`; return; }
+  S.admReq = req || []; S.admPays = pays || [];
+  $('#view').innerHTML = `<h2 style="margin:0">⏳ À vérifier (${S.admReq.length})</h2>
+    ${S.admReq.length ? `<p class="muted" style="margin:0;font-size:13.5px">Le propriétaire dit avoir payé. Regardez votre téléphone (SMS Orange / Moov) : l'argent est-il arrivé avec cette référence ?</p>` : '<p class="muted" style="margin:0">Rien à vérifier ✓</p>'}
+    <div class="stack" style="gap:10px">${S.admReq.map((r, i) => `<section class="card stack" style="gap:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px"><b style="font-size:16px">${esc(r.shop_name)}</b><b class="num" style="font-size:18px">${esc(money(r.amount))}</b></div>
+      <div class="muted" style="font-size:14px">${esc(r.owner_name || '')} · ${r.months} mois · ${esc(PAY_M[r.method])}<br>Réf. : <b style="color:var(--fg);font-family:monospace;font-size:15px">${esc(r.reference)}</b><br>Déclaré le ${dt(r.created_at)}</div>
+      <div class="row"><button class="btn" data-rok="${i}">✓ Reçu, valider</button><button class="btn ghost" data-rno="${i}" style="color:var(--bad)">✕ Refuser</button></div></section>`).join('')}</div>
+    <h2 style="margin:8px 0 0">🧾 Tous les paiements</h2>
+    <div class="plist">${S.admPays.map((p, i) => `<button class="prow" data-pr="${i}" style="${p.cancelled_at ? 'opacity:.55' : ''}"><span style="min-width:0;flex:1 1 auto">
+        <span class="nm">${esc(p.shop_name)}</span><br><span class="sub">Reçu n° ${p.receipt_no} · ${admDay(p.paid_at)} · ${esc(PAY_M[p.method] || p.method)} · ${p.months} mois${p.cancelled_at ? ' · ANNULÉ' : ''}</span></span>
+      <b class="num" style="${p.cancelled_at ? 'text-decoration:line-through' : ''}">${esc(money(p.amount))}</b></button>`).join('') || '<p class="empty">Aucun paiement pour l\'instant.</p>'}</div>`;
+  document.querySelectorAll('[data-rok]').forEach(b => b.onclick = () => adminAccept(S.admReq[b.dataset.rok]));
+  document.querySelectorAll('[data-rno]').forEach(b => b.onclick = () => adminReject(S.admReq[b.dataset.rno]));
+  document.querySelectorAll('[data-pr]').forEach(b => b.onclick = () => adminReceipt(S.admPays[b.dataset.pr]));
+}
+function adminAccept(r) {
+  admSheet(`<h2>✓ Valider le paiement</h2><div class="muted">${esc(r.shop_name)} · ${r.months} mois · réf. ${esc(r.reference)}</div>
+    <label>Montant vraiment reçu (FCFA)<input id="ra-amount" type="number" inputmode="numeric" value="${esc(r.amount)}" style="font:800 24px var(--f-display);height:58px"></label>
+    <div class="banner" style="margin:0">L'abonnement sera prolongé de ${r.months * 30} jours et le reçu sera prêt à envoyer.</div>
+    <button class="btn huge" id="ra-ok">✓ Valider</button><button class="btn ghost" id="cancel">Annuler</button>`);
+  $('#ra-ok').onclick = async () => {
+    const a = Math.round(Number($('#ra-amount').value)); if (!(a > 0)) return toast('Montant invalide.', true);
+    $('#ra-ok').disabled = true;
+    try { const v = await admRpc('admin_accept_request', { p_request: r.id, p_amount: a }); await adminView(); adminReceipt({ ...v, shop_id: r.shop_id }); }
+    catch (e) { $('#ra-ok').disabled = false; toast(e.message, true); }
+  };
+}
+function adminReject(r) {
+  admSheet(`<h2>✕ Refuser</h2><div class="muted">${esc(r.shop_name)} · réf. ${esc(r.reference)}</div>
+    <label>Motif (le propriétaire le verra)<input id="rr-why" maxlength="300" placeholder="ex. aucun argent reçu avec cette référence"></label>
+    <button class="btn huge" id="rr-ok" style="background:var(--bad)">✕ Refuser</button><button class="btn ghost" id="cancel">Annuler</button>`);
+  $('#rr-ok').onclick = async () => {
+    const w = $('#rr-why').value.trim(); if (w.length < 3) return toast('Tapez le motif.', true);
+    try { await admRpc('admin_reject_request', { p_request: r.id, p_reason: w }); toast('Refusé.'); await adminView(); } catch (e) { toast(e.message, true); }
+  };
+}
 function adminPay(s, st) {
-  st = { m: 1, amount: PRICE, method: 'orange_money', ref: '', ...st };
+  st = { m: 1, amount: priceFor(1), method: 'orange_money', ref: '', ...st };
   admSheet(`<h2>💰 Paiement</h2><div class="muted">${esc(s.name)}</div>
     <div class="muted" style="font-weight:700;font-size:13px">Combien de mois ?</div>
     <div class="chips">${[1, 3, 12].map(m => `<button type="button" data-pm="${m}" aria-pressed="${st.m === m}" style="font-size:17px;padding:12px 18px">${m} mois</button>`).join('')}</div>
@@ -1358,10 +1463,9 @@ function adminPay(s, st) {
     <button class="btn huge" id="pp-ok">✓ Enregistrer</button>
     <button class="btn ghost" id="cancel">Annuler</button>`);
   const base = s.ends_at && new Date(s.ends_at) > new Date() ? new Date(s.ends_at) : new Date();
-  const info = () => { $('#pp-info').textContent = `Nouvelle fin : ${admDay(new Date(base.getTime() + st.m * 30 * 864e5))}`; };
-  info();
+  $('#pp-info').textContent = `Nouvelle fin : ${admDay(new Date(base.getTime() + st.m * 30 * 864e5))}`;
   const read = () => { st.amount = $('#pp-amount').value; st.ref = $('#pp-ref').value; };
-  document.querySelectorAll('[data-pm]').forEach(b => b.onclick = () => { read(); st.m = Number(b.dataset.pm); st.amount = PRICE * st.m; adminPay(s, st); });
+  document.querySelectorAll('[data-pm]').forEach(b => b.onclick = () => { read(); st.m = Number(b.dataset.pm); st.amount = priceFor(st.m); adminPay(s, st); });
   document.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => { read(); st.method = b.dataset.pw; adminPay(s, st); });
   $('#pp-ok').onclick = async () => {
     read();
@@ -1371,32 +1475,67 @@ function adminPay(s, st) {
     const btn = $('#pp-ok'); btn.disabled = true;
     try {
       const r = await admRpc('admin_pay', { p_shop: s.shop_id, p_months: st.m, p_amount: amount, p_method: st.method, p_reference: st.ref.trim() || null });
-      await adminHome(); adminReceipt(admShop(s.shop_id) || s, r);
+      await adminView(); adminReceipt({ ...r, shop_id: s.shop_id });
     } catch (e) { btn.disabled = false; toast(e.message, true); }
   };
 }
-function admReceiptText(s, r) {
-  return `Bara Gestion — Reçu n° ${r.receipt_no}\nBoutique : ${s.name}\nMontant : ${fmtNum.format(r.amount)} FCFA (${r.months} mois)\n`
-    + `Payé le : ${admDay(r.paid_at)} — ${PAY_M[r.method].replace(/^\S+ /, '')}${r.reference ? ' (réf. ' + r.reference + ')' : ''}\n`
-    + `Abonnement valable jusqu'au : ${admDay(r.ends_at || s.ends_at)}\nMerci pour votre confiance !`;
+
+// Reçu : à l'écran, en PDF, par WhatsApp ; on peut le revoir à tout moment (onglet Paiements, ou Reçus d'une boutique).
+function admReceiptText(p, s) {
+  return `Bara Gestion — Reçu n° ${p.receipt_no}${p.cancelled_at ? ' (ANNULÉ)' : ''}\nBoutique : ${p.shop_name || (s && s.name) || ''}\nMontant : ${fmtNum.format(p.amount)} FCFA (${p.months} mois)\n`
+    + `Payé le : ${admDay(p.paid_at)} — ${(PAY_M[p.method] || p.method).replace(/^\S+ /, '')}${p.reference ? ' (réf. ' + p.reference + ')' : ''}\n`
+    + (s && !p.cancelled_at ? `Abonnement valable jusqu'au : ${admDay(p.ends_at || s.ends_at)}\n` : '') + 'Merci pour votre confiance !';
 }
-function adminReceipt(s, r) {
-  const txt = admReceiptText(s, r);
-  admSheet(`<h2>✅ Paiement enregistré</h2>
+function admReceiptPdf(p, s) {
+  const pdf = newPdf(), L = 60, R = 535;
+  pdf.page();
+  pdf.text(L, 70, 'Bara Gestion', { size: 22, bold: true, color: GREEN });
+  pdf.text(L, 88, 'Abonnement à l\'application de gestion', { size: 10, color: GREY });
+  pdf.text(R, 70, 'REÇU', { size: 22, bold: true, align: 'right' });
+  pdf.text(R, 88, 'N° ' + p.receipt_no, { size: 12, bold: true, align: 'right' });
+  pdf.line(L, R, 104, GREEN, 1.2);
+  const rows = [['Boutique', p.shop_name || (s && s.name) || ''], ['Montant', plainMoney(p.amount) + ' FCFA'], ['Durée', p.months + ' mois'],
+    ['Payé le', admDay(p.paid_at)], ['Moyen de paiement', (PAY_M[p.method] || p.method).replace(/^\S+ /, '')]];
+  if (p.reference) rows.push(['Référence', p.reference]);
+  if (s && !p.cancelled_at) rows.push(['Valable jusqu\'au', admDay(p.ends_at || s.ends_at)]);
+  rows.forEach(([k, v], i) => { pdf.text(L, 140 + i * 26, k, { size: 11, color: GREY }); pdf.text(L + 170, 140 + i * 26, String(v), { size: 12, bold: true }); });
+  if (p.cancelled_at) pdf.text(L, 160 + rows.length * 26, 'PAIEMENT ANNULÉ le ' + admDay(p.cancelled_at) + (p.cancel_reason ? ' : ' + p.cancel_reason : ''), { size: 12, bold: true, color: RED });
+  pdf.text(L, 200 + rows.length * 26, 'Merci pour votre confiance.', { size: 11 });
+  return pdf.build('Reçu ' + p.receipt_no);
+}
+function adminReceipt(p) {
+  const s = admShop(p.shop_id), full = { ...p, shop_name: p.shop_name || (s && s.name) || '' };
+  const txt = admReceiptText(full, s);
+  const last = !p.cancelled_at && !!(p.id || p.payment_id);   // la base refuse si ce n'est pas le dernier
+  admSheet(`<h2>🧾 Reçu n° ${p.receipt_no}</h2>
     <div class="card" style="white-space:pre-line;font-size:15px;line-height:1.5">${esc(txt)}</div>
-    ${s.owner_phone ? `<a class="btn huge" href="${esc(waLink(s.owner_phone, txt))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Envoyer le reçu</a>` : ''}
-    <button class="btn ghost" id="rc-copy">📋 Copier</button>
+    ${s && s.owner_phone ? `<a class="btn huge" href="${esc(waLink(s.owner_phone, txt))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Envoyer par WhatsApp</a>` : ''}
+    <div class="row"><button class="btn ghost" id="rc-pdf">📄 PDF</button><button class="btn ghost" id="rc-copy">📋 Copier</button></div>
+    ${last ? '<button class="btn ghost" id="rc-cancel" style="color:var(--bad)">Annuler ce paiement (erreur)</button>' : ''}
     <button class="btn ghost" id="cancel">Fermer</button>`);
+  $('#rc-pdf').onclick = () => downloadPdf(admReceiptPdf(full, s), `Recu-${p.receipt_no}.pdf`);
   $('#rc-copy').onclick = async () => { try { await navigator.clipboard.writeText(txt); toast('Copié ✓'); } catch (e) { toast('Copie impossible', true); } };
+  const rc = $('#rc-cancel'); if (rc) rc.onclick = () => adminCancelPay({ ...full, id: p.id || p.payment_id });
+}
+function adminCancelPay(p) {
+  admSheet(`<h2>Annuler le reçu n° ${p.receipt_no} ?</h2>
+    <div class="muted">Seulement pour une erreur (paiement saisi deux fois, mauvaise boutique…). L'abonnement perd ${p.months * 30} jours. Le reçu reste dans l'historique, marqué « annulé ».</div>
+    <label>Motif (obligatoire)<input id="cp-why" maxlength="300"></label>
+    <button class="btn huge" id="cp-ok" style="background:var(--bad)">Annuler le paiement</button><button class="btn ghost" id="cancel">Retour</button>`);
+  $('#cp-ok').onclick = async () => {
+    const w = $('#cp-why').value.trim(); if (w.length < 3) return toast('Tapez le motif.', true);
+    try { await admRpc('admin_cancel_payment', { p_payment: p.id, p_reason: w }); toast('Paiement annulé.'); await adminView(); } catch (e) { toast(e.message, true); }
+  };
 }
 async function adminPayments(s) {
   let l;
-  try { l = await admRpc('admin_payments', { p_shop: s.shop_id }); } catch (e) { return toast(e.message, true); }
-  admSheet(`<h2>🧾 Paiements</h2><div class="muted">${esc(s.name)} · total ${esc(money(s.paid_total))}</div>
-    <div class="plist">${(l || []).map((p, i) => `<button class="prow" data-pr="${i}"><span style="min-width:0;flex:1 1 auto"><span class="nm">Reçu n° ${p.receipt_no} · ${admDay(p.paid_at)}</span><br>
+  try { l = await admRpc('admin_payments', { p_shop: s.shop_id, p_limit: 100 }); } catch (e) { return toast(e.message, true); }
+  S.admPays = (S.admPays || []).filter(q => q.shop_id !== s.shop_id).concat(l || []);
+  admSheet(`<h2>🧾 Reçus</h2><div class="muted">${esc(s.name)} · total ${esc(money(s.paid_total))}</div>
+    <div class="plist">${(l || []).map((p, i) => `<button class="prow" data-pr="${i}" style="${p.cancelled_at ? 'opacity:.55' : ''}"><span style="min-width:0;flex:1 1 auto"><span class="nm">Reçu n° ${p.receipt_no} · ${admDay(p.paid_at)}${p.cancelled_at ? ' · ANNULÉ' : ''}</span><br>
       <span class="sub">${esc(PAY_M[p.method] || p.method)} · ${p.months} mois${p.reference ? ' · ' + esc(p.reference) : ''}</span></span><b class="num">${esc(money(p.amount))}</b></button>`).join('') || '<p class="empty">Aucun paiement (essai gratuit).</p>'}</div>
     <button class="btn ghost" id="cancel">Fermer</button>`);
-  document.querySelectorAll('[data-pr]').forEach(b => b.onclick = () => adminReceipt(s, { ...l[b.dataset.pr], ends_at: null }));
+  document.querySelectorAll('[data-pr]').forEach(b => b.onclick = () => adminReceipt(l[b.dataset.pr]));
 }
 function adminContact(s) {
   admSheet(`<h2>📞 Contact et note</h2><div class="muted">${esc(s.name)}</div>
@@ -1405,23 +1544,25 @@ function adminContact(s) {
     <button class="btn huge" id="ac-ok">✓ Enregistrer</button><button class="btn ghost" id="cancel">Annuler</button>`);
   $('#ac-ok').onclick = async () => {
     try { await admRpc('admin_set_contact', { p_shop: s.shop_id, p_phone: $('#ac-tel').value.trim() || null, p_note: $('#ac-note').value.trim() || null });
-      toast('Enregistré ✓'); await adminHome(); adminShopSheet(s.shop_id); } catch (e) { toast(e.message, true); }
+      toast('Enregistré ✓'); await adminView(); adminShopSheet(s.shop_id); } catch (e) { toast(e.message, true); }
   };
 }
-function adminSuspend(s) {
+function adminSuspend(s, idle) {
   if (s.suspended) {
     admSheet(`<h2>▶️ Réactiver ${esc(s.name)} ?</h2><div class="muted">La boutique pourra de nouveau vendre (si l'abonnement n'est pas fini).</div>
       <button class="btn huge" id="su-ok">▶️ Réactiver</button><button class="btn ghost" id="cancel">Annuler</button>`);
   } else {
-    admSheet(`<h2>⏸️ Suspendre ${esc(s.name)} ?</h2><div class="muted">La boutique passe en lecture seule tout de suite : elle ne peut plus vendre. Ses données sont gardées.</div>
-      <label>Motif (obligatoire)<input id="su-why" maxlength="300" placeholder="ex. paiement refusé, fraude…"></label>
-      <button class="btn huge" id="su-ok" style="background:var(--bad)">⏸️ Suspendre</button><button class="btn ghost" id="cancel">Annuler</button>`);
+    admSheet(`<h2>⏸️ Désactiver ${esc(s.name)} ?</h2><div class="muted">La boutique passe en lecture seule tout de suite : elle ne peut plus vendre. Ses données sont gardées. Vous pourrez la réactiver.</div>
+      <div class="chips" style="flex-wrap:wrap">${['N\'utilise pas l\'application', 'Paiement refusé', 'Boutique fermée', 'Fraude'].map(m => `<button type="button" data-sw="${esc(m)}" aria-pressed="${idle && m.startsWith('N\'utilise')}">${esc(m)}</button>`).join('')}</div>
+      <label>Motif (obligatoire)<input id="su-why" maxlength="300" value="${idle ? 'N\'utilise pas l\'application' : ''}"></label>
+      <button class="btn huge" id="su-ok" style="background:var(--bad)">⏸️ Désactiver</button><button class="btn ghost" id="cancel">Annuler</button>`);
+    document.querySelectorAll('[data-sw]').forEach(b => b.onclick = () => { $('#su-why').value = b.dataset.sw; document.querySelectorAll('[data-sw]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
   }
   $('#su-ok').onclick = async () => {
     const why = $('#su-why') ? $('#su-why').value.trim() : null;
     if (!s.suspended && (!why || why.length < 3)) return toast('Tapez le motif.', true);
     try { await admRpc('admin_suspend', { p_shop: s.shop_id, p_suspended: !s.suspended, p_reason: why });
-      toast(s.suspended ? 'Boutique réactivée ✓' : 'Boutique suspendue'); await adminHome(); adminShopSheet(s.shop_id); } catch (e) { toast(e.message, true); }
+      toast(s.suspended ? 'Boutique réactivée ✓' : 'Boutique désactivée'); await adminView(); adminShopSheet(s.shop_id); } catch (e) { toast(e.message, true); }
   };
 }
 const genPw = () => { const a = 'abcdefghjkmnpqrstuvwxyz23456789', r = new Uint32Array(10); crypto.getRandomValues(r); return [...r].map(x => a[x % a.length]).join(''); };
@@ -1461,7 +1602,7 @@ function adminNewShop(v) {
     <div class="chips" style="flex-wrap:wrap">${Object.entries(SHOP_TYPES).map(([k, [i, l]]) => `<button type="button" data-nt="${k}" aria-pressed="${v.type === k}">${i} ${l}</button>`).join('')}</div>
     <label>Nom du propriétaire<input id="ns-owner" maxlength="80" value="${esc(v.owner)}" placeholder="ex. Awa Ouédraogo"></label>
     <label>Son numéro WhatsApp<input id="ns-phone" type="tel" inputmode="tel" value="${esc(v.phone)}" placeholder="+226 70 00 00 00"></label>
-    <label>Identifiant de connexion<input id="ns-login" maxlength="40" value="${esc(v.login)}" autocapitalize="none" placeholder="ex. awa.beguedo"></label>
+    <label>Identifiant de connexion<input id="ns-login" maxlength="40" value="${esc(v.login)}" autocapitalize="none" placeholder="ex. awa.ouedraogo"></label>
     <label>Mot de passe<input id="ns-pw" maxlength="72" value="${esc(v.pw)}" style="font-family:monospace"></label>
     <div class="muted" style="font-weight:700;font-size:13px">Essai gratuit</div>
     <div class="chips">${[30, 15, 0].map(d => `<button type="button" data-nd="${d}" aria-pressed="${v.trial === d}">${d ? d + ' jours' : 'Aucun'}</button>`).join('')}</div>
@@ -1481,31 +1622,184 @@ function adminNewShop(v) {
     try {
       const r = await admCall({ action: 'create_shop', name: v.name.trim(), shop_type: v.type, owner_name: v.owner.trim(), phone: v.phone.trim() || null,
         login: v.login.trim().toLowerCase(), password: v.pw, trial_days: v.trial });
-      await adminHome(); adminAccess('✅ Boutique créée', r.login, v.pw, v.name.trim(), v.phone.trim());
+      S.admTab = 'shops'; S.admF = 'new'; await adminView(); adminAccess('✅ Boutique créée', r.login, v.pw, v.name.trim(), v.phone.trim());
     } catch (e) { btn.disabled = false; btn.textContent = '✓ Créer la boutique'; toast(e.message, true); }
   };
 }
-const JOUR = { shop_created: ['🏪', 'Boutique créée'], subscription_paid: ['💰', 'Paiement'], shop_suspended: ['⏸️', 'Suspendue'], shop_reactivated: ['▶️', 'Réactivée'],
-  owner_password_reset: ['🔑', 'Mot de passe changé'], shop_contact_updated: ['📞', 'Contact modifié'] };
+
+/* --- ⚙️ Réglages --- */
+function admSettings() {
+  const s = S.admSet || {};
+  const N = (id, l, v, ph) => `<label>${l}<input id="${id}" type="tel" inputmode="tel" value="${esc(v || '')}" placeholder="${ph}" style="font-size:18px;height:50px"></label>`;
+  const P = (m) => `<label>${m} mois (FCFA)<input id="st-p${m}" type="number" inputmode="numeric" value="${esc(s['price_' + m])}" style="font-size:18px;height:50px;font-weight:700"></label>`;
+  $('#view').innerHTML = `<h2 style="margin:0">📱 Où les boutiques vous paient</h2>
+    <p class="muted" style="margin:0;font-size:13.5px">Ces numéros s'affichent dans l'écran « Abonnement » des boutiques et dans vos rappels WhatsApp.</p>
+    <section class="card stack" style="gap:10px">
+      ${N('st-om', '🟠 Numéro Orange Money', s.om_number, '+226 70 00 00 00')}
+      ${N('st-moov', '🔵 Numéro Moov Money', s.moov_number, '+226 60 00 00 00')}
+      <label>Au nom de (affiché aux clients)<input id="st-name" maxlength="80" value="${esc(s.pay_name || '')}" placeholder="ex. Bara Gestion"></label>
+      ${N('st-wa', '💬 Votre WhatsApp (pour être contacté)', s.wa_number, '+39 …')}</section>
+    <h2 style="margin:0">💲 Prix</h2>
+    <section class="card stack" style="gap:10px"><div class="grid2" style="grid-template-columns:repeat(3,minmax(0,1fr))">${P(1)}${P(3)}${P(12)}</div></section>
+    <h2 style="margin:0">🏪 Inscriptions libres (« Créer ma boutique »)</h2>
+    <section class="card stack" style="gap:10px">
+      <div class="chips"><button type="button" data-so="1" aria-pressed="${!!s.signup_open}">✅ Ouvertes</button><button type="button" data-so="0" aria-pressed="${!s.signup_open}">⛔ Fermées</button></div>
+      <label>Maximum par jour (tout le monde)<input id="st-max" type="number" inputmode="numeric" value="${esc(s.signup_day_max)}"></label>
+      <label>« Inactive » après combien de jours sans activité ?<input id="st-idle" type="number" inputmode="numeric" value="${esc(s.inactive_days)}"></label></section>
+    <button class="btn huge" id="st-ok">✓ Enregistrer les réglages</button>
+    <div class="row"><button class="btn ghost" id="st-journal">📜 Journal</button><button class="btn ghost" id="st-help">❓ Aide</button></div>
+    <div class="row"><button class="btn ghost" id="st-lock">🔒 Verrouiller</button><button class="btn ghost" id="st-pin">🔢 Changer mon code</button></div>
+    <button class="btn ghost" id="st-out">🚪 Se déconnecter</button>`;
+  let open = !!s.signup_open;
+  document.querySelectorAll('[data-so]').forEach(b => b.onclick = () => { open = b.dataset.so === '1'; document.querySelectorAll('[data-so]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  $('#st-ok').onclick = async () => {
+    const p = { om_number: $('#st-om').value.trim(), moov_number: $('#st-moov').value.trim(), wa_number: $('#st-wa').value.trim(), pay_name: $('#st-name').value.trim(),
+      price_1: Math.round(Number($('#st-p1').value)), price_3: Math.round(Number($('#st-p3').value)), price_12: Math.round(Number($('#st-p12').value)),
+      signup_open: open, signup_day_max: Math.round(Number($('#st-max').value)), inactive_days: Math.round(Number($('#st-idle').value)) };
+    if ([p.price_1, p.price_3, p.price_12].some(x => !(x >= 100))) return toast('Prix invalide.', true);
+    if (!(p.signup_day_max >= 0 && p.signup_day_max <= 500)) return toast('Maximum par jour : 0 à 500.', true);
+    if (!(p.inactive_days >= 3 && p.inactive_days <= 90)) return toast('Jours d\'inactivité : 3 à 90.', true);
+    try { await admRpc('admin_set_settings', { p }); toast('Réglages enregistrés ✓'); adminView(); } catch (e) { toast(e.message, true); }
+  };
+  $('#st-journal').onclick = adminJournal;
+  $('#st-help').onclick = adminHelp;
+  $('#st-lock').onclick = () => lock();
+  $('#st-pin').onclick = () => pinSetup(true);
+  $('#st-out').onclick = () => askLeave();
+}
+const JOUR = { shop_created: ['🏪', 'Boutique créée'], subscription_paid: ['💰', 'Paiement'], shop_suspended: ['⏸️', 'Désactivée'], shop_reactivated: ['▶️', 'Réactivée'],
+  owner_password_reset: ['🔑', 'Mot de passe changé'], shop_contact_updated: ['📞', 'Contact modifié'], payment_request_rejected: ['✕', 'Paiement refusé'],
+  payment_cancelled: ['↩️', 'Paiement annulé'], settings_updated: ['⚙️', 'Réglages modifiés'] };
 async function adminJournal() {
   let l; try { l = await admRpc('admin_journal', { p_limit: 100 }); } catch (e) { return toast(e.message, true); }
   admSheet(`<h2>📜 Journal</h2><div class="muted">Vos actions d'administration (rien ne peut être effacé).</div>
     <div class="stack" style="gap:6px">${(l || []).map(a => { const [i, t] = JOUR[a.action] || ['•', a.action], dd = a.details || {};
-      const extra = a.action === 'subscription_paid' ? ` · ${fmtNum.format(dd.amount)} FCFA, ${dd.months} mois (reçu ${dd.receipt_no || '—'})` : dd.reason ? ' · ' + dd.reason : '';
-      return `<div class="arow"><span class="aic" aria-hidden="true">${i}</span><div style="min-width:0"><div style="font-size:14px"><b>${esc(t)}</b> · ${esc(a.shop_name || '')}${esc(extra)}</div>
+      const extra = a.action === 'subscription_paid' ? ` · ${fmtNum.format(dd.amount)} FCFA, ${dd.months} mois (reçu ${dd.receipt_no || '—'})`
+        : a.action === 'shop_created' && dd.self_signup ? ' · inscription libre' : dd.reason ? ' · ' + dd.reason : '';
+      return `<div class="arow"><span class="aic" aria-hidden="true">${i}</span><div style="min-width:0"><div style="font-size:14px"><b>${esc(t)}</b>${a.shop_name ? ' · ' + esc(a.shop_name) : ''}${esc(extra)}</div>
         <div class="muted" style="font-size:12px">${dt(a.created_at)}</div></div></div>`; }).join('') || '<p class="empty">Rien pour l\'instant.</p>'}</div>
     <button class="btn ghost" id="cancel">Fermer</button>`);
 }
 function adminHelp() {
   admSheet(`<h2>❓ Comment ça marche</h2>
-    ${[['＋', 'Nouvelle boutique : nom, métier, propriétaire, identifiant. Donnez-lui ensuite l\'identifiant et le mot de passe.'],
-       ['🟠', '« À relancer » : essai ou abonnement qui finit dans 7 jours (ou fini). Touchez la boutique → 💬 Rappel WhatsApp.'],
-       ['💰', 'Le client a payé : touchez la boutique → Enregistrer un paiement (1, 3 ou 12 mois). Envoyez le reçu.'],
+    ${[['🔄', 'Renouvellement : le propriétaire envoie l\'argent à votre numéro (Orange / Moov), puis tape la référence du SMS dans l\'application. Vous voyez « ⏳ à vérifier » : regardez votre SMS, puis ✓ Valider. L\'abonnement est prolongé tout seul, le reçu est prêt.'],
+       ['🏪', 'Les commerçants peuvent créer leur boutique eux-mêmes (30 jours gratuits). Vous les voyez dans Boutiques → 🆕 Nouvelles. Fermez les inscriptions dans Réglages si besoin.'],
+       ['🟠', '« À relancer » : essai ou abonnement qui finit dans 7 jours. Touchez la boutique → 💬 Rappel de paiement.'],
+       ['💰', 'Paiement reçu autrement (espèces…) : touchez la boutique → Enregistrer un paiement.'],
+       ['🧾', 'Revoir un reçu : onglet Paiements → touchez la ligne (PDF ou WhatsApp). Une erreur ? « Annuler ce paiement », avec un motif.'],
+       ['😴', 'Inactive : aucune vente ni mouvement de stock depuis 14 jours. Demandez s\'il a un problème, ou désactivez la boutique.'],
        ['🔴', 'Pas payé : 7 jours de grâce, puis lecture seule toute seule. Rien n\'est effacé.'],
-       ['⏸️', 'Suspendre : seulement en cas de problème (fraude…). Motif obligatoire.'],
-       ['🔐', 'Vous ne voyez jamais les ventes ni le stock des boutiques : c\'est leur confiance.']]
+       ['🔐', 'Vous ne voyez jamais les ventes ni le stock des boutiques, seulement la date de leur dernière activité.']]
       .map(([i, t]) => `<div class="card" style="display:flex;gap:12px;padding:12px"><span style="font-size:26px">${i}</span><span style="font-size:15px">${t}</span></div>`).join('')}
     <button class="btn ghost" id="cancel">Fermer</button>`);
+}
+
+/* ===== 💳 Abonnement (propriétaire) : où payer, « J'ai payé », reçus ===== */
+async function viewSub() {
+  $('#view').innerHTML = '<p class="empty">Chargement…</p>';
+  if (S.role !== 'owner') { $('#view').innerHTML = '<p class="empty">Réservé au propriétaire.</p>'; return; }
+  const [info, req, pays] = await Promise.all([
+    sb.rpc('platform_info'),
+    sb.from('payment_requests').select('id,months,amount,method,reference,status,reject_reason,created_at').eq('shop_id', S.shop.id).order('created_at', { ascending: false }).limit(10),
+    sb.from('subscription_payments').select('receipt_no,paid_at,amount,months,method,reference').eq('shop_id', S.shop.id).order('paid_at', { ascending: false }).limit(20)]);
+  await loadSub();
+  if (S.tab !== 'sub') return;
+  if (info.error) { $('#view').innerHTML = `<div class="banner bad">${esc(/platform_info|function/.test(info.error.message || '') ? 'Cet écran sera prêt après la prochaine mise à jour de Bara Gestion.' : cleanErr(info.error))}</div>`; return; }
+  const I = info.data || {}, s = S.sub || {}, R = req.data || [], Pm = pays.data || [];
+  const end = s.ends_at ? new Date(s.ends_at).toLocaleDateString('fr-FR') : '';
+  const st = { trial: ['🆓', 'Essai gratuit', `${s.days_left} jour(s) restant(s) · fin le ${end}`, 'ok'], active: ['🟢', 'Abonnement payé', `${s.days_left} jour(s) restant(s) · jusqu'au ${end}`, 'ok'],
+    grace: ['🟠', 'Abonnement terminé', 'Payez vite : bientôt l\'application passera en lecture seule.', ''], read_only: ['🔴', 'Abonnement terminé', 'Lecture seule : les ventes sont bloquées. Payez pour tout débloquer.', 'bad'],
+    suspended: ['⏸️', 'Boutique désactivée', 'Contactez Bara Gestion.', 'bad'] }[s.status] || ['', '', '', ''];
+  const pend = R.filter(r => r.status === 'pending');
+  const num = (ic, label, n) => n ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-size:15px">${ic} ${label}</span>
+      <b style="font:800 22px var(--f-display);user-select:all">${esc(n)}</b><button class="btn ghost small" type="button" data-cp="${esc(n.replace(/\s/g, ''))}">📋 Copier</button></div>` : '';
+  $('#view').innerHTML = `<h2 style="margin:0">💳 Abonnement</h2>
+    <div class="banner ${st[3]}" style="margin:0;display:flex;gap:12px;align-items:center"><span style="font-size:34px">${st[0]}</span><div><b style="font-size:18px">${esc(st[1])}</b><br>${esc(st[2])}</div></div>
+    ${pend.length ? `<div class="banner" style="margin:0">⏳ ${pend.length} paiement(s) en vérification par Bara Gestion. Votre abonnement sera prolongé dès la validation.</div>` : ''}
+    <section class="card stack" style="gap:10px">
+      <b style="font-size:17px">Prix</b>
+      <div class="grid2" style="grid-template-columns:repeat(3,minmax(0,1fr))">${[1, 3, 12].map(m => `<div class="metric"><span>${m} mois</span><b style="font-size:17px">${esc(fmtNum.format(I['price_' + m] || 0))}</b></div>`).join('')}</div>
+      <b style="font-size:17px;margin-top:6px">1. Envoyez l'argent à :</b>
+      ${num('🟠 Orange Money', '', I.om_number)}${num('🔵 Moov Money', '', I.moov_number)}
+      ${I.pay_name ? `<div class="muted">Au nom de : <b>${esc(I.pay_name)}</b></div>` : ''}
+      ${!I.om_number && !I.moov_number ? '<div class="banner" style="margin:0">Numéro de paiement pas encore disponible : contactez Bara Gestion.</div>' : ''}
+      <b style="font-size:17px;margin-top:6px">2. Vous recevez un SMS avec une référence.</b>
+      <b style="font-size:17px">3. Touchez « J'ai payé » et tapez cette référence.</b>
+      <button class="btn huge" id="sb-paid" ${!I.om_number && !I.moov_number ? 'disabled' : ''}>✅ J'ai payé</button>
+      ${I.wa_number ? `<a class="btn ghost" href="${esc(waLink(I.wa_number, 'Bonjour Bara Gestion, ici ' + S.shop.name + '. '))}" target="_blank" rel="noopener" style="text-decoration:none">💬 Contacter Bara Gestion</a>` : ''}</section>
+    ${R.length ? `<h2 style="margin:0">Mes déclarations</h2><div class="stack" style="gap:6px">${R.map(r => `<div class="arow ${r.status === 'rejected' ? 'bad' : ''}"><span class="aic">${r.status === 'pending' ? '⏳' : r.status === 'accepted' ? '✅' : '✕'}</span>
+      <div><div style="font-size:14px"><b>${esc(money(r.amount))}</b> · ${r.months} mois · réf. ${esc(r.reference)}</div>
+      <div class="muted" style="font-size:12.5px">${dt(r.created_at)} · ${r.status === 'pending' ? 'en vérification' : r.status === 'accepted' ? 'validé' : 'refusé' + (r.reject_reason ? ' : ' + esc(r.reject_reason) : '')}</div></div></div>`).join('')}</div>` : ''}
+    ${Pm.length ? `<h2 style="margin:0">🧾 Mes reçus</h2><div class="plist">${Pm.map((p, i) => `<button class="prow" data-rc="${i}"><span style="min-width:0;flex:1 1 auto"><span class="nm">Reçu n° ${p.receipt_no ?? '—'}</span><br><span class="sub">${new Date(p.paid_at).toLocaleDateString('fr-FR')} · ${p.months} mois</span></span><b class="num">${esc(money(p.amount))}</b></button>`).join('')}</div>` : ''}`;
+  document.querySelectorAll('[data-cp]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.cp); toast('Numéro copié ✓'); } catch (e) { toast('Copie impossible', true); } });
+  const pd = $('#sb-paid'); if (pd) pd.onclick = () => subPaidSheet(I, {});
+  document.querySelectorAll('[data-rc]').forEach(b => b.onclick = () => { const p = Pm[b.dataset.rc];
+    downloadPdf(admReceiptPdf({ ...p, shop_name: S.shop.name }, null), `Recu-${p.receipt_no}.pdf`); });
+}
+function subPaidSheet(I, v) {
+  v = { m: 1, method: I.om_number ? 'orange_money' : 'moov_money', ref: '', ...v };
+  const methods = [['orange_money', '🟠 Orange Money', I.om_number], ['moov_money', '🔵 Moov Money', I.moov_number]].filter(x => x[2]);
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="J'ai payé">
+    <h2>✅ J'ai payé</h2>
+    <div class="muted" style="font-weight:700;font-size:13px">Pour combien de mois ?</div>
+    <div class="chips">${[1, 3, 12].map(m => `<button type="button" data-sm="${m}" aria-pressed="${v.m === m}" style="font-size:16px;padding:12px 14px">${m} mois<br><small>${esc(fmtNum.format(I['price_' + m] || 0))}</small></button>`).join('')}</div>
+    <div class="muted" style="font-weight:700;font-size:13px">Avec</div>
+    <div class="chips">${methods.map(([k, l]) => `<button type="button" data-sme="${k}" aria-pressed="${v.method === k}">${l}</button>`).join('')}</div>
+    <label>Référence du SMS reçu<input id="sp-ref" maxlength="60" value="${esc(v.ref)}" autocapitalize="characters" placeholder="ex. PP241029.1234.A56789" style="font:700 18px monospace;height:54px"></label>
+    <div class="banner" style="margin:0">Montant envoyé : <b>${esc(money(I['price_' + v.m] || 0))}</b>. Bara Gestion vérifie, puis votre abonnement est prolongé.</div>
+    <button class="btn huge" id="sp-ok">Envoyer</button><button class="btn ghost" id="cancel">Annuler</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  const read = () => { v.ref = $('#sp-ref').value; };
+  document.querySelectorAll('[data-sm]').forEach(b => b.onclick = () => { read(); v.m = Number(b.dataset.sm); subPaidSheet(I, v); });
+  document.querySelectorAll('[data-sme]').forEach(b => b.onclick = () => { read(); v.method = b.dataset.sme; subPaidSheet(I, v); });
+  $('#sp-ok').onclick = async () => {
+    read(); const ref = v.ref.trim();
+    if (ref.length < 3) return toast('Tapez la référence du SMS.', true);
+    $('#sp-ok').disabled = true;
+    const { error } = await sb.rpc('request_payment', { p_shop: S.shop.id, p_months: v.m, p_method: v.method, p_reference: ref });
+    if (error) { $('#sp-ok').disabled = false; return toast(cleanErr(error), true); }
+    closeSheet(); toast('Envoyé ✓ Bara Gestion va vérifier votre paiement.'); viewSub();
+  };
+}
+
+/* ===== 🏪 « Créer ma boutique » (écran de connexion) ===== */
+function drawSignup(v) {
+  v = { name: '', type: '', owner: '', phone: '', ...v };
+  $('#app').innerHTML = `<form class="login" id="su-form" autocomplete="on" style="padding-block:6vh 24px">
+    <div class="brand">Créer ma boutique<small>30 jours gratuits, sans engagement</small></div>
+    <label>Nom de la boutique<input id="su-name" maxlength="100" value="${esc(v.name)}" placeholder="ex. Boutique Awa" required></label>
+    <div class="muted" style="font-weight:700;font-size:13px">Votre métier</div>
+    <div class="chips" style="flex-wrap:wrap">${Object.entries(SHOP_TYPES).map(([k, [i, l]]) => `<button type="button" data-st="${k}" aria-pressed="${v.type === k}">${i} ${l}</button>`).join('')}</div>
+    <label>Votre nom<input id="su-owner" maxlength="80" value="${esc(v.owner)}" autocomplete="name" required></label>
+    <label>Votre numéro (WhatsApp)<input id="su-phone" type="tel" inputmode="tel" value="${esc(v.phone)}" placeholder="+226 70 00 00 00" autocomplete="tel" required></label>
+    <div class="muted" style="font-size:13px;margin-top:-10px">Ce numéro sera votre identifiant de connexion.</div>
+    <label>Choisissez un mot de passe (8 caractères minimum)<input id="su-pw" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Retapez le mot de passe<input id="su-pw2" type="password" autocomplete="new-password" required></label>
+    <input id="su-web" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px">
+    <button class="btn huge" type="submit" id="su-ok">🏪 Créer ma boutique</button>
+    <button class="btn ghost" type="button" id="su-back">‹ J'ai déjà un compte</button></form>`;
+  const read = () => { v.name = $('#su-name').value; v.owner = $('#su-owner').value; v.phone = $('#su-phone').value; };
+  document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { read(); v.type = b.dataset.st; drawSignup(v); });
+  $('#su-back').onclick = () => drawLogin();
+  $('#su-form').onsubmit = async ev => {
+    ev.preventDefault(); read();
+    if (v.name.trim().length < 2) return toast('Tapez le nom de la boutique.', true);
+    if (!v.type) return toast('Touchez votre métier.', true);
+    if (!/^\+?[0-9 ]{8,20}$/.test(v.phone.trim())) return toast('Numéro invalide (ex. +226 70 00 00 00).', true);
+    const pw = $('#su-pw').value;
+    if (pw.length < 8) return toast('Mot de passe : 8 caractères minimum.', true);
+    if (pw !== $('#su-pw2').value) return toast('Les deux mots de passe sont différents.', true);
+    const b = $('#su-ok'); b.disabled = true; b.textContent = 'Création…';
+    const body = { name: v.name.trim(), shop_type: v.type, owner_name: v.owner.trim(), phone: v.phone.trim(), password: pw, website: $('#su-web').value };
+    let { data, error } = await sb.functions.invoke('signup-shop', { body });
+    // Si la fonction a été créée avec une majuscule dans Supabase (« Signup-shop »).
+    if (error && error.context && error.context.status === 404) ({ data, error } = await sb.functions.invoke('Signup-shop', { body }));
+    let msg = data && data.error;
+    if (error) { msg = cleanErr(error); try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch (e) {} }
+    if (msg || !data || !data.login) { b.disabled = false; b.textContent = '🏪 Créer ma boutique'; return toast(/non-2xx|Failed to send/i.test(msg || '') ? 'Inscription indisponible pour le moment. Réessayez plus tard.' : (msg || 'Inscription impossible'), true); }
+    toast('Boutique créée ✓ Votre identifiant : ' + data.login);
+    await doLogin(data.login, pw);
+  };
 }
 
 /* ===== Cloche des alertes (propriétaire) ===== */
