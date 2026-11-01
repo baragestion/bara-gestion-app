@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-11-01e';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-11-01f';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1009,8 +1009,8 @@ async function selectShop(id) {
   storage.setItem('bg_shop', id);
   S.cart = new Map(); S.cartUnits = new Map(); S.arr = null; S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = (m.role === 'owner' || m.role === 'manager') ? 'home' : 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
-  S.top = null; S.catPhotos = null;
-  await Promise.all([loadProducts().then(() => Promise.all([canCredit() ? loadCustomers(true) : null, loadTop()])), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings(), loadAdmin(), loadCatPhotos()]);
+  S.top = null; S.catPhotos = null; S.lots = null;
+  await Promise.all([loadProducts().then(() => Promise.all([canCredit() ? loadCustomers(true) : null, loadTop()])), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings(), loadAdmin(), loadCatPhotos(), loadLots()]);
   saveCache();
   gate();
   draw();
@@ -1146,6 +1146,8 @@ async function viewHome() {
   const T = (tab, ic, bg, label, badge, badgeCls) => `<button class="htile" data-go="${tab}"><span class="hic" style="background:${bg}" aria-hidden="true">${ic}</span>
     ${badge ? `<span class="hbadge ${badgeCls || ''}">${badge}</span>` : ''}<span class="hl">${label}</span></button>`;
   $('#view').innerHTML = `
+    ${(() => { const e = expiring(); if (!e.length) return ''; const bad = e.filter(x => daysTo(x.n.expires_on) <= 7).length;
+      return `<button class="banner ${bad ? 'bad' : ''}" id="h-exp" style="border:0;width:100%;text-align:left;font-weight:600;cursor:pointer;margin:0">📅 ${e.length} produit${e.length > 1 ? 's' : ''} ${e.length > 1 ? 'périment' : 'périme'} bientôt${bad ? ` (dont ${bad} dans 7 jours ou moins)` : ''} ›</button>`; })()}
     ${S.alertCount && S.role === 'owner' ? `<button class="banner bad" id="h-al" style="border:0;width:100%;text-align:left;font-weight:600;cursor:pointer;margin:0">🔔 ${S.alertCount} alerte${S.alertCount > 1 ? 's' : ''} à voir ›</button>` : ''}
     <section class="hero">
       <div style="opacity:.85;font-size:14px">Aujourd'hui</div>
@@ -1166,6 +1168,7 @@ async function viewHome() {
     <button class="btn huge" data-go="sale">＋ Nouvelle vente</button>`;
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
   const ha = $('#h-al'); if (ha) ha.onclick = alertsSheet;
+  const he = $('#h-exp'); if (he) he.onclick = () => { S.pFilter = 'exp'; S.pq = ''; go('products'); };
 }
 
 /* ===== Plus : les autres écrans en grosses tuiles ===== */
@@ -3096,6 +3099,98 @@ function trackSheet(p) {
 }
 
 /* ===== Onglet Produits ===== */
+/* ===== 📅 Dates de péremption =====
+   Lots notés à l'arrivage (date + quantité). Les ventes ne changent pas : on suppose que les plus
+   vieux partent d'abord, donc le stock restant est compté dans les lots qui périment le plus tard. */
+const EXP_SOON = 30;   // « bientôt » : dans 30 jours ou moins
+const expShop = () => S.shop && ['alimentation', 'cosmetiques'].includes(S.shop.type);
+async function loadLots() {
+  if (!S.shop) return;
+  const key = 'bg_lots_' + S.shop.id;
+  if (S.offline) { try { S.lots = JSON.parse(storage.getItem(key) || '[]'); } catch (e) { S.lots = []; } return; }
+  try {
+    const { data, error } = await sb.from('product_lots').select('id,product_id,expires_on,qty,created_at').eq('shop_id', S.shop.id).is('removed_at', null).order('expires_on');
+    if (error) { S.lots = S.lots || []; return; }
+    S.lots = data || [];
+    try { storage.setItem(key, JSON.stringify(S.lots)); } catch (e) {}
+  } catch (e) { S.lots = S.lots || []; }
+}
+const daysTo = d => { const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((new Date(d + 'T00:00:00') - t) / 864e5); };
+const dayFr = d => { const [y, m, j] = String(d).split('-'); return `${j}/${m}/${y}`; };
+function lotState(p) {
+  const l = (S.lots || []).filter(x => x.product_id === p.id).sort((a, b) => b.expires_on.localeCompare(a.expires_on));
+  let rem = Math.max(0, Number(p.stock_qty) || 0);
+  const all = l.map(x => { const left = Math.min(Number(x.qty), rem); rem -= left; return { ...x, left }; });
+  const active = all.filter(x => x.left > 0);
+  const next = active.length ? active.reduce((a, b) => a.expires_on <= b.expires_on ? a : b) : null;
+  return { all, active, next, free: rem };
+}
+// Produits dont un lot encore en rayon périme dans 30 jours ou moins (ou est déjà périmé), le plus urgent d'abord.
+function expiring() {
+  if (!S.lots || !S.lots.length) return [];
+  return S.products.map(p => ({ p, n: lotState(p).next })).filter(x => x.n && daysTo(x.n.expires_on) <= EXP_SOON)
+    .sort((a, b) => a.n.expires_on.localeCompare(b.n.expires_on));
+}
+function expLabel(n) {
+  const d = daysTo(n.expires_on);
+  return d < 0 ? ['❌ Périmé depuis le ' + dayFr(n.expires_on), 'var(--bad)'] : d === 0 ? ['❌ Périme aujourd\'hui', 'var(--bad)']
+    : d <= 7 ? [`📅 Périme dans ${d} j (${dayFr(n.expires_on)})`, 'var(--bad)'] : d <= EXP_SOON ? [`📅 Périme dans ${d} j (${dayFr(n.expires_on)})`, 'var(--warn)']
+    : [`📅 ${dayFr(n.expires_on)}`, 'var(--muted)'];
+}
+function lotsSheet(pid) {
+  const p = S.products.find(x => x.id === pid); if (!p) return;
+  const st = lotState(p), mgr = isManager() && canWrite() && !S.offline;
+  const today = new Date().toISOString().slice(0, 10);
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Dates de péremption">
+    <h2>📅 Péremption : ${esc(p.name)}</h2>
+    <div class="muted">En stock : <b>${esc(qty(p.stock_qty))} ${esc(UNITS[p.unit])}</b>. Les plus vieux sont comptés comme vendus d'abord.</div>
+    <div class="stack" style="gap:8px">${st.all.map(x => { const [lab, col] = expLabel(x), d = daysTo(x.expires_on);
+      return `<div class="card" style="display:flex;gap:10px;align-items:center;padding:10px 12px;${x.left > 0 ? '' : 'opacity:.55'}">
+        <div style="flex:1 1 auto;min-width:0"><b style="color:${x.left > 0 ? col : 'inherit'};font-size:15.5px">${esc(lab)}</b><br>
+          <span class="muted" style="font-size:13px">${x.left > 0 ? `encore ${esc(qty(x.left))} en rayon (sur ${esc(qty(x.qty))})` : `${esc(qty(x.qty))} : déjà vendus`}</span></div>
+        ${mgr && x.left > 0 && d < 0 ? `<button class="btn small" data-lt="${esc(x.id)}" data-q="${x.left}" style="flex:0 0 auto;background:var(--bad)">🗑️ Jeté</button>` : ''}
+        ${mgr ? `<button class="btn ghost small" data-lr="${esc(x.id)}" style="flex:0 0 auto" aria-label="Retirer cette date">✕</button>` : ''}</div>`; }).join('')
+      || '<p class="muted" style="margin:0">Aucune date notée pour ce produit.</p>'}</div>
+    ${mgr ? `<section class="card stack" style="gap:8px"><b>＋ Ajouter une date</b>
+      <div class="row"><label>Périme le<input id="lt-date" type="date" min="${today}" style="font-size:17px;height:50px"></label>
+        <label>Quantité (${esc(UNITS[p.unit])})<input id="lt-qty" type="number" inputmode="decimal" min="0" step="any" value="${st.free > 0 ? st.free : ''}" style="font-size:17px;height:50px"></label></div>
+      ${st.free > 0 && st.all.length ? `<span class="muted" style="font-size:12.5px">${esc(qty(st.free))} en stock sans date.</span>` : ''}
+      <button class="btn" id="lt-add">Enregistrer la date</button></section>` : ''}
+    <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  const reload = async () => { await loadLots(); lotsSheet(pid); };
+  const ad = $('#lt-add'); if (ad) ad.onclick = async () => {
+    const d = $('#lt-date').value, q = Number($('#lt-qty').value);
+    if (!d) return toast('Choisissez la date.', true);
+    if (!(q > 0)) return toast('Tapez la quantité.', true);
+    const { error } = await sb.rpc('add_product_lot', { p_product: pid, p_expires: d, p_qty: q });
+    if (error) return toast(/add_product_lot|function/.test(error.message || '') ? 'Installez d\'abord la mise à jour 023 (péremption) dans Supabase.' : cleanErr(error), true);
+    toast('Date enregistrée ✓'); reload();
+  };
+  document.querySelectorAll('[data-lr]').forEach(b => b.onclick = async () => {
+    const { error } = await sb.rpc('remove_product_lot', { p_lot: b.dataset.lr });
+    if (error) return toast(cleanErr(error), true); toast('Date retirée.'); reload();
+  });
+  // Produit périmé jeté : perte de stock (motif « Périmé ») puis la date est retirée.
+  document.querySelectorAll('[data-lt]').forEach(b => b.onclick = async () => {
+    if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Confirmer'; return; }
+    const { error } = await sb.rpc('adjust_stock', { p_shop: S.shop.id, p_product: pid, p_kind: 'loss', p_qty: Number(b.dataset.q), p_reason: 'Périmé' });
+    if (error) return toast(cleanErr(error), true);
+    await sb.rpc('remove_product_lot', { p_lot: b.dataset.lt });
+    toast('Retiré du stock (périmé).'); await loadProducts(); S.summary = null; reload();
+  });
+}
+// Après un arrivage avec une date : un lot par produit reçu.
+async function addLots(rows, date) {
+  if (!date) return;
+  for (const [pid, q] of rows) {
+    const { error } = await sb.rpc('add_product_lot', { p_product: pid, p_expires: date, p_qty: q });
+    if (error) { toast('Date de péremption non enregistrée : ' + (/function/.test(error.message || '') ? 'installez la mise à jour 023.' : cleanErr(error)), true); return; }
+  }
+  await loadLots();
+}
+
 /* ===== 📷 Photos des produits =====
    Photo de la boutique (prise par le propriétaire ou le gérant) > photo du catalogue (ajoutée par
    l'administrateur, même nom de produit) > dessin > image du type > lettres. Réduites à ~30 Ko avant l'envoi. */
@@ -3711,7 +3806,8 @@ function viewProducts() {
   if (S.catMode === 'prices' && isManager() && S.catPick && S.catPick.size) return viewCatalogPrices();
   S.catMode = null;
   const mgr = isManager(), low = S.products.filter(isLow).length;
-  if (!['all', 'low'].includes(S.pFilter)) S.pFilter = 'all';
+  if (!['all', 'low', 'exp'].includes(S.pFilter)) S.pFilter = 'all';
+  const nexp = expiring().length;
   $('#view').innerHTML = `${S.countPending === 'submitted' && S.role === 'owner' ? '<div class="banner">Un comptage du gérant attend votre validation : touchez « Comptage ».</div>' : S.countPending === 'open' ? '<div class="banner">Un comptage est en cours : touchez « Comptage » pour le continuer.</div>' : ''}
     ${mgr ? `<button class="btn huge" id="newp" ${canWrite() ? '' : 'disabled'}>＋ Nouveau produit</button>
       <div class="row"><button class="btn ghost" id="count" ${S.offline ? 'disabled' : ''}>🔢 Comptage</button><button class="btn ghost" id="labels">🏷️ Étiquettes</button></div>` : ''}
@@ -3719,7 +3815,8 @@ function viewProducts() {
       <button class="btn ghost" id="findu" ${S.offline ? 'disabled' : ''}>🔎 Retrouver un appareil</button></div>` : ''}
     <input id="pq" type="search" placeholder="🔍 Chercher un produit" value="${esc(S.pq || '')}" autocomplete="off" aria-label="Chercher un produit" style="height:50px;font-size:16px">
     <div class="chips" role="group" aria-label="Filtre"><button aria-pressed="${S.pFilter === 'all'}" data-pf="all">Tous (${S.products.length})</button>
-      <button aria-pressed="${S.pFilter === 'low'}" data-pf="low">⚠️ À recommander (${low})</button></div>
+      <button aria-pressed="${S.pFilter === 'low'}" data-pf="low">⚠️ À recommander (${low})</button>
+      ${nexp || S.pFilter === 'exp' ? `<button aria-pressed="${S.pFilter === 'exp'}" data-pf="exp">📅 Péremption (${nexp})</button>` : ''}</div>
     ${S.pFilter === 'low' && low ? '<button class="btn" id="order">📝 Bon de commande (WhatsApp)</button>' : ''}
     <div id="pfolder-head"></div>
     <div class="plist" id="prod-list"></div>`;
@@ -3751,11 +3848,12 @@ function viewProducts() {
       return;
     }
     const base = sh ? sh.items : S.products.filter(p => (!folders || !S.pCat || t || S.pFilter !== 'all' || p.category === S.pCat));
-    const list = base.filter(p => (S.pFilter !== 'low' || isLow(p)) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t));
+    const expL = S.pFilter === 'exp' ? expiring().map(x => x.p) : null;
+    const list = (expL || base).filter(p => (S.pFilter !== 'low' || isLow(p)) && (!t || p.name.toLowerCase().includes(t) || (p.barcode || '').toLowerCase() === t));
     // Une seule ligne par produit à variantes (« Nike Air Force 1 » : 12 tailles / couleurs), sauf pendant une recherche.
     const rows = [], seen = new Set();
     list.forEach(p => { const k = famKey(p);
-      if (t || S.pFilter === 'low' || !k || famList(p).length < 2) { rows.push(p); return; }
+      if (t || S.pFilter !== 'all' || !k || famList(p).length < 2) { rows.push(p); return; }
       if (!seen.has(k)) { seen.add(k); rows.push({ fam: true, p }); } });
     $('#prod-list').innerHTML = rows.map(r => { if (r.fam) { const l = famList(r.p), stq = l.reduce((a, q) => a + Number(q.stock_qty), 0), lo = l.filter(isLow).length;
         return `<button class="prow" data-pfam="${esc(r.p.id)}">${prodIcon({ name: famName(r.p), category: r.p.category, kind: r.p.kind }, 48)}
@@ -3764,10 +3862,10 @@ function viewProducts() {
       const p = r;
       return `<button class="prow" data-p="${esc(p.id)}">
         ${prodIcon(p, 48)}
-        <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(p.name)}</span><br><span class="sub">${esc(money(p.sell_price))}</span></span>
+        <span style="min-width:0;flex:1 1 auto"><span class="nm">${esc(p.name)}</span><br><span class="sub">${esc(money(p.sell_price))}</span>${(() => { const n = lotState(p).next; if (!n || daysTo(n.expires_on) > EXP_SOON) return ''; const [l, c] = expLabel(n); return `<br><span class="sub" style="color:${c};font-weight:700">${esc(l)}</span>`; })()}</span>
         <span style="text-align:right;flex:0 0 auto"><b class="num" style="font:800 22px var(--f-display);color:${stockColor(p)}">${esc(qty(p.stock_qty))}</b><br>
           <span class="sub">${esc(UNITS[p.unit])}${Number(p.stock_qty) <= 0 ? ' · épuisé' : isLow(p) ? ' · bas' : ''}</span></span></button>`; }).join('')
-      || `<p class="empty">${S.pFilter === 'low' ? 'Aucun produit à recommander ✓' : 'Aucun produit.'}</p>`;
+      || `<p class="empty">${S.pFilter === 'low' ? 'Aucun produit à recommander ✓' : S.pFilter === 'exp' ? 'Rien ne périme dans les 30 jours ✓' : 'Aucun produit.'}</p>`;
     document.querySelectorAll('[data-pfam]').forEach(b => b.onclick = () => famProductsSheet(b.dataset.pfam));
     document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => productSheet(b.dataset.p));
   };
@@ -3810,6 +3908,7 @@ function gridReceive(l) {
       <input type="number" inputmode="numeric" min="0" step="1" data-gq="${esc(q.id)}" placeholder="0" style="width:90px;height:50px;font-size:20px;text-align:center"></label>`).join('')}</div>
     <label>Prix d'achat d'une pièce (facultatif)<input id="g-cost" type="number" inputmode="numeric" min="0"></label>
     <label>Fournisseur (facultatif)<input id="g-sup" maxlength="80"></label>
+    ${expShop() ? '<label>📅 Date de péremption (facultatif)<input id="g-exp" type="date"></label>' : ''}
     <div class="banner" id="g-tot" style="margin:0">Total : 0</div>
     <button class="btn huge" type="submit">✓ Enregistrer l'arrivage</button>
     <button class="btn ghost" type="button" id="cancel">Annuler</button></form></div>`;
@@ -3828,6 +3927,7 @@ function gridReceive(l) {
       if (r.error) { toast(cleanErr(r.error) + (ok ? ` (${ok} déjà enregistrés)` : ''), true); break; }
       ok++;
     }
+    if (ok && $('#g-exp') && $('#g-exp').value) await addLots(rows.slice(0, ok), $('#g-exp').value);
     await loadProducts(); S.summary = null;
     if (ok === rows.length) { closeSheet(); toast('Arrivage enregistré ✓ ' + total + ' ' + plu(UNITS[l[0].unit] || '', total)); draw(); } else btn.disabled = false;
   };
@@ -3983,6 +4083,7 @@ function productSheet(pid) {
       <button class="btn ghost" id="pa-adj" ${canWrite() ? '' : 'disabled'}><span>➖</span>Perte ou correction<small>cassé, volé, erreur…</small></button>
       <button class="btn ghost" id="pa-sell"><span>🛒</span>Vendre<small>ajouter au panier</small></button></div>`
       : '<button class="btn" id="pa-sell">🛒 Ajouter au panier</button>'}
+    ${!isTracked(p) && (expShop() || lotState(p).all.length) ? `<button class="btn ghost" id="pa-lots">📅 Dates de péremption${(() => { const n = lotState(p).next; return n ? ' · ' + esc(expLabel(n)[0].replace(/^\S+ /, '')) : ''; })()}</button>` : ''}
     ${mgr && canWrite() && !S.offline ? `<div class="row">${photoBtn('btn ghost', '📷 ' + (p.photo ? 'Changer la photo' : 'Ajouter une photo'), 'id="pa-photo"')}${p.photo ? '<button class="btn ghost" id="pa-nophoto">Retirer la photo</button>' : ''}</div>` : ''}
     ${mgr && !isTracked(p) && devType(p.category) && p.unit === 'piece' && canWrite() && !S.offline ? '<button class="btn ghost" id="pa-track">🔢 Suivre chaque appareil par son IMEI</button>' : ''}
     ${mgr && p.barcode ? `<div class="muted" style="font-size:12.5px">Code ${esc(p.barcode)}</div>` : ''}
@@ -3994,6 +4095,7 @@ function productSheet(pid) {
   const pe = $('#pa-exist'); if (pe) pe.onclick = () => arrival({ pid: p.id, existing: true });
   const pf = $('#pa-find'); if (pf) pf.onclick = findUnitSheet;
   const pt = $('#pa-track'); if (pt) pt.onclick = () => trackSheet(p);
+  const plo = $('#pa-lots'); if (plo) plo.onclick = () => lotsSheet(p.id);
   bindPhotoBtns('#pa-photo', f => productPhoto(p, false, f));
   const pn = $('#pa-nophoto'); if (pn) pn.onclick = () => productPhoto(p, true);
   document.querySelectorAll('[data-unit-code]').forEach(b => b.onclick = () => unitSheet(b.dataset.unitCode));
@@ -4046,6 +4148,7 @@ function openSheet(kind, pid) {
       <label>Prix d'achat de chaque ${esc(UNITS[p.unit])} (facultatif)<input id="f-cost" type="number" inputmode="numeric" min="0" step="1" value="${esc(S.costs[p.id] ?? '')}" placeholder="si vous savez" ${big}></label>
       ${MORE(`<label>Transport payé (FCFA)<input id="f-tr" type="number" inputmode="numeric" min="0" step="1" value="0"></label>
         <label>Fournisseur<input id="f-sup" maxlength="100"></label>`)}
+      ${expShop() || lotState(p).all.length ? '<label>📅 Date de péremption (facultatif)<input id="f-exp" type="date" style="font-size:17px;height:50px"></label>' : ''}
       <div class="muted" id="recv-info" style="font-size:13.5px"></div>`;
   } else {
     title = '➖ ' + p.name;
@@ -4145,6 +4248,7 @@ function openSheet(kind, pid) {
       res = await sb.rpc('receive_stock', {
         p_shop: S.shop.id, p_product: pid, p_qty: num('f-qty'), p_unit_cost: optNum('f-cost'),
         p_transport: Math.round(num('f-tr')), p_supplier: $('#f-sup').value });
+      if (!res.error && $('#f-exp') && $('#f-exp').value) await addLots([[pid, num('f-qty')]], $('#f-exp').value);
     } else {
       res = await sb.rpc('adjust_stock', {
         p_shop: S.shop.id, p_product: pid, p_kind: $('#f-kind').value, p_qty: num('f-qty'), p_reason: $('#f-reason').value });
