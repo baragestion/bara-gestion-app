@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-10-30a';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-11-01a';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -963,6 +963,9 @@ async function doLogin(raw, password) {
 }
 
 async function loadContext() {
+  { const m = location.hash.match(/paye=([0-9a-f-]{36})/i); let saved = null; try { saved = storage.getItem('bg_paye'); } catch (e) {}
+    if (m || saved) S.payeId = (m && m[1]) || saved;
+    if (m) try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
   $('#app').innerHTML = '<p class="empty">Chargement…</p>';
   const { data, error } = await sb.from('shop_members')
     .select('shop_id, role, display_name, offline_allowed, discount_max_pct, credit_allowed, shops(name, shop_type, phone, address, invoice_footer, offline_max_pending)')
@@ -1011,7 +1014,8 @@ async function selectShop(id) {
   saveCache();
   gate();
   draw();
-  try { if (!S.products.length && !storage.getItem('bg_guide_' + S.shop.id) && isManager()) guideSheet(); } catch (e) {}
+  if (S.payeId && S.role === 'owner' && !S.offline) go('sub');
+  else try { if (!S.products.length && !storage.getItem('bg_guide_' + S.shop.id) && isManager()) guideSheet(); } catch (e) {}
   registerDevice();
   syncQueue();
 }
@@ -1413,7 +1417,8 @@ function adminShopSheet(id) {
 async function admPayTab() {
   $('#view').innerHTML = '<p class="empty">Chargement…</p>';
   let req, pays;
-  try { [req, pays] = await Promise.all([admRpc('admin_payment_requests'), admRpc('admin_payments', { p_shop: null, p_limit: 200 })]); }
+  try { [req, pays] = await Promise.all([admRpc('admin_payment_requests'), admRpc('admin_payments', { p_shop: null, p_limit: 200 })]);
+    S.admOnline = await admRpc('admin_online_payments', { p_limit: 30 }).catch(() => []); }
   catch (e) { $('#view').innerHTML = `<div class="banner bad">${esc(e.message)}</div>`; return; }
   S.admReq = req || []; S.admPays = pays || [];
   $('#view').innerHTML = `<h2 style="margin:0">⏳ À vérifier (${S.admReq.length})</h2>
@@ -1422,6 +1427,8 @@ async function admPayTab() {
       <div style="display:flex;justify-content:space-between;gap:8px"><b style="font-size:16px">${esc(r.shop_name)}</b><b class="num" style="font-size:18px">${esc(money(r.amount))}</b></div>
       <div class="muted" style="font-size:14px">${esc(r.owner_name || '')} · ${r.months} mois · ${esc(PAY_M[r.method])}<br>Réf. : <b style="color:var(--fg);font-family:monospace;font-size:15px">${esc(r.reference)}</b><br>Déclaré le ${dt(r.created_at)}</div>
       <div class="row"><button class="btn" data-rok="${i}">✓ Reçu, valider</button><button class="btn ghost" data-rno="${i}" style="color:var(--bad)">✕ Refuser</button></div></section>`).join('')}</div>
+    ${S.admOnline && S.admOnline.length ? `<h2 style="margin:8px 0 0">🤖 Paiements en ligne</h2><div class="stack" style="gap:6px">${S.admOnline.slice(0, 15).map(o => `<div class="arow ${o.status === 'failed' ? 'bad' : ''}"><span class="aic">${o.status === 'completed' ? '✅' : o.status === 'failed' ? '✕' : '⏳'}</span>
+      <div style="min-width:0"><div style="font-size:14px"><b>${esc(o.shop_name)}</b> · ${esc(money(o.amount))} · ${o.months} mois${o.operator ? ' · ' + esc(o.operator) : ''}</div><div class="muted" style="font-size:12px">${dt(o.created_at)} · ${o.status === 'completed' ? 'payé, abonnement prolongé' : o.status === 'failed' ? 'échoué' : 'en cours'}</div></div></div>`).join('')}</div>` : ''}
     <h2 style="margin:8px 0 0">🧾 Tous les paiements</h2>
     <div class="plist">${S.admPays.map((p, i) => `<button class="prow" data-pr="${i}" style="${p.cancelled_at ? 'opacity:.55' : ''}"><span style="min-width:0;flex:1 1 auto">
         <span class="nm">${esc(p.shop_name)}</span><br><span class="sub">Reçu n° ${p.receipt_no} · ${admDay(p.paid_at)} · ${esc(PAY_M[p.method] || p.method)} · ${p.months} mois${p.cancelled_at ? ' · ANNULÉ' : ''}</span></span>
@@ -1640,6 +1647,10 @@ function admSettings() {
       ${N('st-moov', '🔵 Numéro Moov Money', s.moov_number, '+226 60 00 00 00')}
       <label>Au nom de (affiché aux clients)<input id="st-name" maxlength="80" value="${esc(s.pay_name || '')}" placeholder="ex. Bara Gestion"></label>
       ${N('st-wa', '💬 Votre WhatsApp (pour être contacté)', s.wa_number, '+39 …')}</section>
+    <h2 style="margin:0">🤖 Paiement automatique (Ligdicash)</h2>
+    <section class="card stack" style="gap:10px">
+      <div class="chips"><button type="button" data-op="1" aria-pressed="${!!s.online_pay}">✅ Activé</button><button type="button" data-op="0" aria-pressed="${!s.online_pay}">⛔ Désactivé</button></div>
+      <span class="muted" style="font-size:13px">Activez seulement après avoir mis vos clés Ligdicash dans Supabase et fait un essai. « J'ai payé » reste toujours possible.</span></section>
     <h2 style="margin:0">💲 Prix</h2>
     <section class="card stack" style="gap:10px"><div class="grid2" style="grid-template-columns:repeat(3,minmax(0,1fr))">${P(1)}${P(3)}${P(12)}</div></section>
     <h2 style="margin:0">🏪 Inscriptions libres (« Créer ma boutique »)</h2>
@@ -1651,12 +1662,13 @@ function admSettings() {
     <div class="row"><button class="btn ghost" id="st-journal">📜 Journal</button><button class="btn ghost" id="st-help">❓ Aide</button></div>
     <div class="row"><button class="btn ghost" id="st-lock">🔒 Verrouiller</button><button class="btn ghost" id="st-pin">🔢 Changer mon code</button></div>
     <button class="btn ghost" id="st-out">🚪 Se déconnecter</button>`;
-  let open = !!s.signup_open;
+  let open = !!s.signup_open, onl = !!s.online_pay;
+  document.querySelectorAll('[data-op]').forEach(b => b.onclick = () => { onl = b.dataset.op === '1'; document.querySelectorAll('[data-op]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
   document.querySelectorAll('[data-so]').forEach(b => b.onclick = () => { open = b.dataset.so === '1'; document.querySelectorAll('[data-so]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
   $('#st-ok').onclick = async () => {
     const p = { om_number: $('#st-om').value.trim(), moov_number: $('#st-moov').value.trim(), wa_number: $('#st-wa').value.trim(), pay_name: $('#st-name').value.trim(),
       price_1: Math.round(Number($('#st-p1').value)), price_3: Math.round(Number($('#st-p3').value)), price_12: Math.round(Number($('#st-p12').value)),
-      signup_open: open, signup_day_max: Math.round(Number($('#st-max').value)), inactive_days: Math.round(Number($('#st-idle').value)) };
+      signup_open: open, online_pay: onl, signup_day_max: Math.round(Number($('#st-max').value)), inactive_days: Math.round(Number($('#st-idle').value)) };
     if ([p.price_1, p.price_3, p.price_12].some(x => !(x >= 100))) return toast('Prix invalide.', true);
     if (!(p.signup_day_max >= 0 && p.signup_day_max <= 500)) return toast('Maximum par jour : 0 à 500.', true);
     if (!(p.inactive_days >= 3 && p.inactive_days <= 90)) return toast('Jours d\'inactivité : 3 à 90.', true);
@@ -1720,6 +1732,12 @@ async function viewSub() {
     <section class="card stack" style="gap:10px">
       <b style="font-size:17px">Prix</b>
       <div class="grid2" style="grid-template-columns:repeat(3,minmax(0,1fr))">${[1, 3, 12].map(m => `<div class="metric"><span>${m} mois</span><b style="font-size:17px">${esc(fmtNum.format(I['price_' + m] || 0))}</b></div>`).join('')}</div>
+      ${I.online_pay ? `<div class="banner ok" style="margin:0;display:grid;gap:10px">
+        <b style="font-size:17px">📲 Payer maintenant (Orange Money / Moov Money)</b>
+        <div class="chips">${[1, 3, 12].map(m => `<button type="button" data-om="${m}" aria-pressed="${(S.onlineM || 1) === m}" style="font-size:16px;padding:12px 14px">${m} mois<br><small>${esc(fmtNum.format(I['price_' + m] || 0))}</small></button>`).join('')}</div>
+        <button class="btn huge" id="sb-online">📲 Payer ${esc(fmtNum.format(I['price_' + (S.onlineM || 1)] || 0))} FCFA</button>
+        <span class="muted" style="font-size:13px">La page de paiement s'ouvre ; confirmez avec votre code Orange / Moov. L'abonnement est prolongé tout seul.</span></div>
+      <b style="font-size:15px;margin-top:6px">Ou payez vous-même, puis déclarez le paiement :</b>` : ''}
       <b style="font-size:17px;margin-top:6px">1. Envoyez l'argent à :</b>
       ${num('🟠 Orange Money', '', I.om_number)}${num('🔵 Moov Money', '', I.moov_number)}
       ${I.pay_name ? `<div class="muted">Au nom de : <b>${esc(I.pay_name)}</b></div>` : ''}
@@ -1734,6 +1752,15 @@ async function viewSub() {
     ${Pm.length ? `<h2 style="margin:0">🧾 Mes reçus</h2><div class="plist">${Pm.map((p, i) => `<button class="prow" data-rc="${i}"><span style="min-width:0;flex:1 1 auto"><span class="nm">Reçu n° ${p.receipt_no ?? '—'}</span><br><span class="sub">${new Date(p.paid_at).toLocaleDateString('fr-FR')} · ${p.months} mois</span></span><b class="num">${esc(money(p.amount))}</b></button>`).join('')}</div>` : ''}`;
   document.querySelectorAll('[data-cp]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.cp); toast('Numéro copié ✓'); } catch (e) { toast('Copie impossible', true); } });
   const pd = $('#sb-paid'); if (pd) pd.onclick = () => subPaidSheet(I, {});
+  document.querySelectorAll('[data-om]').forEach(b => b.onclick = () => { S.onlineM = Number(b.dataset.om); viewSub(); });
+  const on = $('#sb-online'); if (on) on.onclick = async () => {
+    on.disabled = true; on.textContent = 'Ouverture du paiement…';
+    try { const r = await payOnline({ action: 'start', shop_id: S.shop.id, months: S.onlineM || 1 });
+      try { storage.setItem('bg_paye', r.id); } catch (e) {}
+      location.href = r.url; }
+    catch (e) { on.disabled = false; on.textContent = 'Réessayer'; toast(e.message, true); }
+  };
+  if (S.payeId) payWatch();
   document.querySelectorAll('[data-rc]').forEach(b => b.onclick = () => { const p = Pm[b.dataset.rc];
     downloadPdf(admReceiptPdf({ ...p, shop_name: S.shop.name }, null), `Recu-${p.receipt_no}.pdf`); });
 }
@@ -1761,6 +1788,29 @@ function subPaidSheet(I, v) {
     if (error) { $('#sp-ok').disabled = false; return toast(cleanErr(error), true); }
     closeSheet(); toast('Envoyé ✓ Bara Gestion va vérifier votre paiement.'); viewSub();
   };
+}
+
+async function payOnline(body) {
+  const { data, error } = await sb.functions.invoke('pay-online', { body });
+  if (error) { let m = cleanErr(error); try { const j = await error.context.json(); if (j && j.error) m = j.error; } catch (e) {} throw new Error(/non-2xx|Failed to send/i.test(m) ? 'Paiement en ligne indisponible pour le moment. Utilisez « J\'ai payé ».' : m); }
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+// Retour de la page Ligdicash : on vérifie le paiement (jusqu'à 3 minutes), puis on affiche le résultat.
+async function payWatch() {
+  if (S.payBusy || !S.payeId) return; S.payBusy = true;
+  const id = S.payeId, box = document.createElement('div');
+  box.className = 'banner'; box.style.margin = '0'; box.innerHTML = '⏳ <b>Vérification de votre paiement…</b> Ne fermez pas l\'application.';
+  const v = $('#view'); if (v) v.prepend(box);
+  let st = 'pending';
+  for (let i = 0; i < 36 && st === 'pending'; i++) {
+    try { st = (await payOnline({ action: 'check', id })).status || 'pending'; } catch (e) { st = 'pending'; }
+    if (st === 'pending') await new Promise(r => setTimeout(r, 5000));
+  }
+  S.payBusy = false; S.payeId = null; try { storage.removeItem('bg_paye'); } catch (e) {}
+  if (st === 'completed') { toast('✅ Paiement reçu : abonnement prolongé.'); await loadSub(); if (S.tab === 'sub') viewSub(); else draw(); }
+  else if (st === 'failed') { box.className = 'banner bad'; box.innerHTML = '✕ Le paiement n\'a pas abouti. Vous pouvez réessayer.'; }
+  else { box.innerHTML = '⏳ Paiement pas encore confirmé par Orange / Moov. Il sera pris en compte tout seul dès sa confirmation.'; }
 }
 
 /* ===== 🏪 « Créer ma boutique » (écran de connexion) ===== */
@@ -1856,7 +1906,7 @@ function viewSale() {
     ${S.last ? `<section class="card" style="display:grid;gap:8px;border-color:var(--accent)">
       <div style="display:flex;align-items:center;gap:10px"><span style="font-size:26px" aria-hidden="true">✅</span>
         <div style="flex:1 1 auto">${S.last.rec ? 'Vente gardée (hors ligne)' : 'Vente enregistrée'}<br><b class="num" style="font-size:20px">${esc(money(S.last.total))}</b></div>
-        <button class="btn small" id="last-inv" style="flex:0 0 auto">Facture</button><button class="btn ghost small" id="last-x" style="flex:0 0 auto">OK</button></div>
+        <button class="btn small" id="last-tk" style="flex:0 0 auto" aria-label="Imprimer le ticket">🖨️</button><button class="btn small" id="last-inv" style="flex:0 0 auto">Facture</button><button class="btn ghost small" id="last-x" style="flex:0 0 auto">OK</button></div>
       ${S.last.change > 0 ? `<div class="change"><span>Rendez la monnaie</span><b>${esc(money(S.last.change))}</b></div>` : ''}</section>` : ''}
     <div style="display:flex;gap:8px">
       <input id="q" type="search" placeholder="🔍 Chercher un produit" value="${esc(S.q)}" autocomplete="off" aria-label="Chercher un produit ou taper un code-barres" style="flex:1 1 auto;height:50px;font-size:16px">
@@ -1876,7 +1926,8 @@ function viewSale() {
     if (sellByCode(q.value)) { S.q = ''; q.value = ''; drawProducts(); }
   };
   S.saleCats = cats;
-  const li = $('#last-inv'); if (li) li.onclick = () => S.last.rec ? openInvoice(recToSale(S.last.rec)) : openInvoice(S.last.id);
+  const li = $('#last-inv'); if (li) li.onclick = () => S.last.rec ? openInvoice(recToSale(S.last.rec), { change: S.last.change }) : openInvoice(S.last.id, { change: S.last.change });
+  const lt = $('#last-tk'); if (lt) lt.onclick = async () => { try { const sale = S.last.rec ? recToSale(S.last.rec) : await loadSale(S.last.id); printSheet({ ...(await buildInvoice(sale)), change: S.last.change || 0 }); } catch (e) { toast(e.message, true); } };
   const lx = $('#last-x'); if (lx) lx.onclick = () => { S.last = null; viewSale(); };
   drawProducts(); drawCart();
 }
@@ -5872,6 +5923,122 @@ async function shareInvoice(inv, phone) {
   toast('Message WhatsApp préparé. Pour envoyer le PDF, utilisez « Télécharger ».');
 }
 
+/* ===== 🖨️ Ticket de caisse sur imprimante thermique (58 mm ou 80 mm) =====
+   Deux façons d'imprimer, sans rien installer côté serveur :
+   1. Bluetooth directement depuis Chrome (imprimantes « BLE », les plus courantes aujourd'hui) ;
+   2. l'application gratuite « RawBT » (Android), pour les imprimantes Bluetooth plus anciennes.
+   Les accents sont retirés (é -> e) : toutes les imprimantes les affichent alors correctement. */
+const PAPER = () => { try { return storage.getItem('bg_paper') === '80' ? 48 : 32; } catch (e) { return 32; } };
+const plainTxt = t => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[«»]/g, '"').replace(/[’‘]/g, "'").replace(/[–—]/g, '-')
+  .replace(/œ/g, 'oe').replace(/Œ/g, 'OE').replace(/[^\x20-\x7e\n]/g, '');
+function tWrap(t, w) {
+  const out = []; let cur = '';
+  plainTxt(t).split(/\s+/).filter(Boolean).forEach(word => {
+    while (word.length > w) { if (cur) { out.push(cur); cur = ''; } out.push(word.slice(0, w)); word = word.slice(w); }
+    if (!cur) cur = word; else if ((cur + ' ' + word).length <= w) cur += ' ' + word; else { out.push(cur); cur = word; }
+  });
+  if (cur) out.push(cur);
+  return out.length ? out : [''];
+}
+const tLR = (l, r, w) => { l = plainTxt(l); r = plainTxt(r); const sp = w - l.length - r.length; return sp >= 1 ? l + ' '.repeat(sp) + r : l.slice(0, Math.max(0, w - r.length - 1)) + ' ' + r; };
+// Contenu du ticket : lignes avec un style (c = centré, b = gras, big = double taille).
+function ticketLines(inv, w) {
+  const L = [], add = (t, o = {}) => L.push({ t: plainTxt(t), ...o }), dash = () => add('-'.repeat(w));
+  add(inv.shop.name, { c: 1, big: 1 });
+  if (inv.shop.address) tWrap(inv.shop.address, w).forEach(x => add(x, { c: 1 }));
+  if (inv.shop.phone) add('Tel. ' + inv.shop.phone, { c: 1 });
+  add('');
+  add((inv.kind === 'quote' ? 'DEVIS ' : 'TICKET ') + inv.num, { c: 1, b: 1 });
+  add(dtFull(inv.date), { c: 1 });
+  if (inv.seller) add('Vendeur : ' + inv.seller, { c: 1 });
+  dash();
+  inv.lines.forEach(l => {
+    tWrap(l.name, w).forEach(x => add(x, { b: 1 }));
+    add(tLR('  ' + plainQty(l.qty) + (l.unit ? ' ' + plu(l.unit, Number(l.qty)) : '') + ' x ' + plainMoney(l.price), plainMoney(l.total), w));
+    (l.units || []).forEach(u => tWrap(unitLine(u), w - 2).forEach(x => add('  ' + x)));
+  });
+  dash();
+  if (inv.discount > 0) add(tLR('Remise', '-' + plainMoney(inv.discount), w));
+  add(tLR('TOTAL', plainMoney(inv.total) + ' F', Math.floor(w / 2)), { big: 1 });
+  if (inv.kind !== 'quote') {
+    const rest = inv.total - inv.paid - (inv.advance || 0);
+    if (inv.advance > 0) add(tLR('Pris sur l\'avance', plainMoney(inv.advance), w));
+    add(tLR('Paye (' + (inv.pay || '') + ')', plainMoney(inv.paid), w));
+    if (inv.change > 0) add(tLR('Monnaie rendue', plainMoney(inv.change), w));
+    if (rest > 0) add(tLR('RESTE A PAYER', plainMoney(rest), w), { b: 1 });
+  }
+  if (inv.customer) add('Client : ' + inv.customer);
+  if (inv.kind !== 'quote' && hasUnits(inv)) { add(''); tWrap('Gardez ce ticket : il prouve votre achat (garantie, vol).', w).forEach(x => add(x, { c: 1 })); }
+  add('');
+  tWrap(inv.shop.footer || 'Merci de votre visite !', w).forEach(x => add(x, { c: 1 }));
+  add('Bara Gestion', { c: 1 });
+  return L;
+}
+function ticketBytes(inv) {
+  const w = PAPER(), out = [0x1b, 0x40, 0x1b, 0x74, 0x00];   // initialiser ; page de caractères de base
+  const push = s => { for (const ch of s) out.push(ch.charCodeAt(0) & 0x7f); };
+  ticketLines(inv, w).forEach(l => {
+    out.push(0x1b, 0x61, l.c ? 1 : 0, 0x1b, 0x45, l.b || l.big ? 1 : 0, 0x1d, 0x21, l.big ? 0x11 : 0x00);
+    push(l.big ? l.t.slice(0, Math.floor(w / 2)) : l.t); out.push(0x0a);
+  });
+  out.push(0x1b, 0x61, 0, 0x1d, 0x21, 0, 0x1b, 0x45, 0, 0x0a, 0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x42, 0x00);   // avance + coupe (si l'imprimante coupe)
+  return new Uint8Array(out);
+}
+// Services Bluetooth des imprimantes thermiques courantes (marques chinoises, Goojprt, Xprinter, MTP…).
+const BT_SERVICES = ['000018f0-0000-1000-8000-00805f9b34fb', 'e7810a71-73ae-499d-8c15-faa9aef0c3f2', '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+  '0000ff00-0000-1000-8000-00805f9b34fb', '0000fee7-0000-1000-8000-00805f9b34fb', '0000ae30-0000-1000-8000-00805f9b34fb'];
+async function btPrinter(again) {
+  if (!again && S.printer && S.printer.device.gatt.connected) return S.printer.ch;
+  let device = !again && S.printer ? S.printer.device : null;
+  if (!device) device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: BT_SERVICES });
+  const gatt = await device.gatt.connect();
+  for (const sv of await gatt.getPrimaryServices()) {
+    for (const ch of await sv.getCharacteristics()) {
+      if (ch.properties.write || ch.properties.writeWithoutResponse) { S.printer = { device, ch }; try { storage.setItem('bg_printer', device.name || 'Imprimante'); } catch (e) {} return ch; }
+    }
+  }
+  throw new Error('Cette imprimante ne reçoit pas les tickets par Bluetooth. Essayez « Avec RawBT ».');
+}
+async function btSend(ch, bytes) {
+  const n = ch.properties.writeWithoutResponse ? 100 : 180;
+  for (let i = 0; i < bytes.length; i += n) {
+    const part = bytes.slice(i, i + n);
+    if (ch.properties.writeWithoutResponse && ch.writeValueWithoutResponse) { await ch.writeValueWithoutResponse(part); await new Promise(r => setTimeout(r, 25)); }
+    else await ch.writeValue(part);
+  }
+}
+const b64bytes = u8 => { let s = ''; u8.forEach(b => s += String.fromCharCode(b)); return btoa(s); };
+function printSheet(inv) {
+  const bt = !!(navigator.bluetooth && navigator.bluetooth.requestDevice), name = (() => { try { return storage.getItem('bg_printer'); } catch (e) { return null; } })();
+  const w = PAPER(), prev = ticketLines(inv, w).map(l => l.c ? ' '.repeat(Math.max(0, Math.floor(((l.big ? w / 2 : w) - l.t.length) / 2))) + l.t : l.t);
+  $('#sheet-host').innerHTML = `<div class="sheet-bg" id="sbg"><div class="sheet" role="dialog" aria-label="Imprimer le ticket">
+    <h2>🖨️ Imprimer le ticket</h2>
+    <pre style="margin:0;background:#fff;color:#111;border:1px solid var(--line);border-radius:8px;padding:10px;font:12px/1.35 monospace;overflow:auto;max-height:38vh;white-space:pre">${esc(prev.join('\n'))}</pre>
+    <div class="chips"><button type="button" data-pp="58" aria-pressed="${w === 32}">Papier 58 mm</button><button type="button" data-pp="80" aria-pressed="${w === 48}">Papier 80 mm</button></div>
+    ${bt ? `<button class="btn huge" id="pr-bt">🖨️ Imprimer${S.printer || name ? ' (' + esc((S.printer && S.printer.device.name) || name) + ')' : ' (Bluetooth)'}</button>
+      ${S.printer || name ? '<button class="btn ghost small" id="pr-other">Choisir une autre imprimante</button>' : ''}`
+      : '<div class="banner" style="margin:0">Ce navigateur ne parle pas directement au Bluetooth. Utilisez Chrome sur Android, ou RawBT.</div>'}
+    <button class="btn ghost" id="pr-rawbt">📲 Avec l'application RawBT</button>
+    <p class="muted" style="margin:0;font-size:12.5px">La 1re fois : allumez l'imprimante, activez le Bluetooth et la localisation du téléphone, puis choisissez l'imprimante dans la liste. Si elle n'apparaît pas, installez « RawBT » (gratuit, Play Store) et touchez « Avec RawBT ».</p>
+    <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
+  $('#cancel').onclick = closeSheet;
+  $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
+  document.querySelectorAll('[data-pp]').forEach(b => b.onclick = () => { try { storage.setItem('bg_paper', b.dataset.pp); } catch (e) {} printSheet(inv); });
+  const go = async again => {
+    const b = $('#pr-bt'); if (b) { b.disabled = true; b.textContent = 'Impression…'; }
+    try { const ch = await btPrinter(again); await btSend(ch, ticketBytes(inv)); toast('Ticket imprimé ✓'); closeSheet(); }
+    catch (e) {
+      if (b) { b.disabled = false; b.textContent = '🖨️ Réessayer'; }
+      if (e && e.name === 'NotFoundError') return;   // liste fermée sans choisir
+      S.printer = null;
+      toast(/bluetooth|gatt|network/i.test((e && e.message) || '') ? 'Imprimante injoignable : est-elle allumée et proche ? Sinon, essayez RawBT.' : ((e && e.message) || 'Impression impossible'), true);
+    }
+  };
+  const pb = $('#pr-bt'); if (pb) pb.onclick = () => go(false);
+  const po = $('#pr-other'); if (po) po.onclick = () => { S.printer = null; try { storage.removeItem('bg_printer'); } catch (e) {} go(true); };
+  $('#pr-rawbt').onclick = () => { location.href = 'intent:base64,' + b64bytes(ticketBytes(inv)) + '#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;'; };
+}
+
 async function openInvoice(saleOrId, opts = {}) {
   let inv, sale;
   try { sale = typeof saleOrId === 'string' ? await loadSale(saleOrId) : saleOrId; inv = await buildInvoice(sale); }
@@ -5891,12 +6058,13 @@ async function openInvoice(saleOrId, opts = {}) {
     ${inv.seller || inv.ref2 ? `<div class="muted" style="font-size:12.5px;text-align:center">${inv.seller ? 'Vendu par ' + esc(inv.seller) : ''}${inv.ref2 ? ' · réf. ' + esc(inv.ref2) : ''}</div>` : ''}
     ${cancelled && sale.cancel_reason ? `<div class="banner bad" style="margin:0">Annulée : ${esc(sale.cancel_reason)}</div>` : ''}
     ${incomplete && S.role === 'owner' ? `<div class="banner" style="margin:0">Ajoutez l'adresse et le téléphone de la boutique (Plus › Équipe, « Fiche de la boutique ») pour la facture.</div>` : ''}
-    ${cancelled ? '' : `<div class="row"><button class="btn" id="inv-share">💬 WhatsApp</button><button class="btn ghost" id="inv-dl">📄 PDF</button></div>`}
+    ${cancelled ? '' : `<button class="btn huge" id="inv-print">🖨️ Imprimer le ticket</button><div class="row"><button class="btn" id="inv-share">💬 WhatsApp</button><button class="btn ghost" id="inv-dl">📄 PDF</button></div>`}
     ${opts.fromHistory && !cancelled && isManager() && sale && sale.id ? `<button class="btn ghost" id="inv-cancel" ${canWrite() ? '' : 'disabled'} style="color:var(--bad)">Annuler cette vente</button>` : ''}
     <button class="btn ghost" id="inv-close">Fermer</button></div></div>`;
   $('#sbg').onclick = ev => { if (ev.target.id === 'sbg') closeSheet(); };
   $('#inv-close').onclick = closeSheet;
   const dl = $('#inv-dl'); if (dl) dl.onclick = () => downloadInvoice(inv);
+  const ip = $('#inv-print'); if (ip) ip.onclick = () => printSheet({ ...inv, change: opts.change || 0 });
   const sh = $('#inv-share'); if (sh) sh.onclick = () => shareInvoice(inv);
   const ca = $('#inv-cancel'); if (ca) ca.onclick = () => cancelDialog(sale.id);
 }
