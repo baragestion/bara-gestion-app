@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-11-01d';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-11-01e';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -2025,7 +2025,7 @@ function drawProducts() {
     $('#plist').className = 'htiles';
     $('#plist').innerHTML = cats.map(c => { const list = S.products.filter(p => p.category === c);
       const inCart = list.reduce((a, p) => a + (S.cart.get(p.id) ? 1 : 0), 0);
-      return `<button class="htile" data-folder="${esc(c)}" style="min-height:118px"><span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${folderIc(c)}</span>
+      return `<button class="htile" data-folder="${esc(c)}" style="min-height:118px">${hicPhoto(groupPhoto(S.products.filter(p => p.category === c)), `<span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${folderIc(c)}</span>`)}
         ${inCart ? `<span class="hbadge">${inCart} au panier</span>` : ''}<span class="hl">${esc(c)}</span><span class="muted" style="font-size:12.5px;font-weight:400">${list.length} produit${list.length > 1 ? 's' : ''}</span></button>`; }).join('');
     document.querySelectorAll('[data-folder]').forEach(b => b.onclick = () => { S.cat = b.dataset.folder; S.nav = { sub: '', brand: '' }; drawProducts(); window.scrollTo(0, 0); });
     return;
@@ -2135,8 +2135,8 @@ const kindRank = (cat, k) => { const l = ((KIND_BY[S.shop.type] || {})[cat]) || 
 function subTiles(sh, st, attr) {
   return sh.subs.map(sb => { const l = sh.inC.filter(p => sh.subOf(p) === sb), fams = new Set(l.map(famName)).size;
     const stq = l.reduce((a, p) => a + Math.max(0, Number(p.stock_qty)), 0), lo = l.filter(isLow).length;
-    const ic = sh.dev ? `<span class="hic" style="background:var(--accent-soft);font:800 20px var(--f-display);color:var(--accent)" aria-hidden="true">${esc(sb === 'Autres' ? '📱' : sb.slice(0, 2).toUpperCase())}</span>`
-      : `<span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${KIND_IC[sb] || '📦'}</span>`;
+    const ic = hicPhoto(groupPhoto(l), sh.dev ? `<span class="hic" style="background:var(--accent-soft);font:800 20px var(--f-display);color:var(--accent)" aria-hidden="true">${esc(sb === 'Autres' ? '📱' : sb.slice(0, 2).toUpperCase())}</span>`
+      : `<span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${KIND_IC[sb] || '📦'}</span>`);
     return `<button class="htile" ${attr}="${esc(sb)}" style="min-height:110px">${ic}${lo ? `<span class="hbadge warn">${lo} bas</span>` : ''}
       <span class="hl">${esc(sb)}</span><span class="muted" style="font-size:12.5px;font-weight:400">${fams} produit${fams > 1 ? 's' : ''} · ${stq} en stock</span></button>`; }).join('');
 }
@@ -3107,6 +3107,8 @@ function photoFor(p) {
     || (S.catKindPhotos || {})[kindOf(p)];   // sinon : la photo d'un produit du même type (ex. une photo de riz pour tous les riz)
   return k ? PHOTO_URL + 'catalog/' + k : '';
 }
+function groupPhoto(list) { const own = list.find(p => p.photo); if (own) return photoFor(own); for (const p of list) { const u = photoFor(p); if (u) return u; } return ''; }
+const hicPhoto = (url, fallback, bg) => url ? `<span class="hic" style="background:#F6F4EE;overflow:hidden;padding:0;width:72px;height:72px" aria-hidden="true">${photoTag(url)}</span>` : fallback;
 const photoTag = (url, css) => `<img src="${esc(url)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;${css || ''}" onerror="this.style.display='none'">`;
 async function loadCatPhotos() {
   if (!S.shop) return;
@@ -3731,7 +3733,7 @@ function viewProducts() {
       $('#pfolder-head').innerHTML = '';
       $('#prod-list').className = 'htiles';
       $('#prod-list').innerHTML = cats.map(c => { const l = S.products.filter(p => p.category === c), lo = l.filter(isLow).length;
-        return `<button class="htile" data-pcat="${esc(c)}" style="min-height:118px"><span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${folderIc(c)}</span>
+        return `<button class="htile" data-pcat="${esc(c)}" style="min-height:118px">${hicPhoto(groupPhoto(S.products.filter(p => p.category === c)), `<span class="hic" style="background:var(--accent-soft);font-size:28px" aria-hidden="true">${folderIc(c)}</span>`)}
           ${lo ? `<span class="hbadge warn">${lo} bas</span>` : ''}<span class="hl">${esc(c)}</span><span class="muted" style="font-size:12.5px;font-weight:400">${l.length} produit${l.length > 1 ? 's' : ''}</span></button>`; }).join('');
       document.querySelectorAll('[data-pcat]').forEach(b => b.onclick = () => { S.pCat = b.dataset.pcat; S.pnav = { sub: '', brand: '' }; draw1(); window.scrollTo(0, 0); });
       return;
