@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-11-01a';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-11-01b';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -1009,8 +1009,8 @@ async function selectShop(id) {
   storage.setItem('bg_shop', id);
   S.cart = new Map(); S.cartUnits = new Map(); S.arr = null; S.ref = uuid(); S.disc = 0; S.custSel = null; S.editQuote = null; S.quotes = null; S.customers = null; S.sales = null; S.summary = null; S.team = null; S.names = null; S.last = null; S.tab = (m.role === 'owner' || m.role === 'manager') ? 'home' : 'sale';
   S.alerts = null; S.devices = null; S.offAllowed = null; S.alertCount = 0;
-  S.top = null;
-  await Promise.all([loadProducts().then(() => Promise.all([canCredit() ? loadCustomers(true) : null, loadTop()])), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings(), loadAdmin()]);
+  S.top = null; S.catPhotos = null;
+  await Promise.all([loadProducts().then(() => Promise.all([canCredit() ? loadCustomers(true) : null, loadTop()])), loadSub(), loadAlertCount(), loadCountState(), loadCash(), loadLockSettings(), loadAdmin(), loadCatPhotos()]);
   saveCache();
   gate();
   draw();
@@ -1040,9 +1040,9 @@ async function loadProducts() {
   const cols = 'id,name,category,unit,sell_price,stock_qty,alert_threshold,barcode';
   // Colonnes ajoutées par les migrations 016 (track_kind) et 018 (kind, brand) : si elles manquent, on lit sans elles.
   let data, error;
-  for (const extra of [',track_kind,kind,brand', ',track_kind', '']) {
+  for (const extra of [',track_kind,kind,brand,photo', ',track_kind,kind,brand', ',track_kind', '']) {
     ({ data, error } = await sb.from('products').select(cols + extra).eq('shop_id', S.shop.id).eq('active', true).order('name'));
-    if (!error || !/track_kind|kind|brand|column/.test(error.message || '')) break;
+    if (!error || !/track_kind|kind|brand|photo|column/.test(error.message || '')) break;
   }
   if (error) return toast(cleanErr(error), true);
   S.products = data || [];
@@ -1635,6 +1635,39 @@ function adminNewShop(v) {
   };
 }
 
+/* --- 📷 Photos du catalogue (administrateur) --- */
+async function adminCatalogPhotos(type) {
+  type = type || S.admPhType || 'alimentation'; S.admPhType = type;
+  const items = (CATALOG[type] || []).map(([name, unit, category, kind]) => ({ name, unit, category, kind: kind || '' }));
+  let map = {};
+  try { const { data } = await sb.from('catalog_photos').select('item_key,path').eq('shop_type', type); (data || []).forEach(r => map[r.item_key] = r.path); } catch (e) {}
+  const done = items.filter(x => map[nameKey(x.name)]).length;
+  let last = null;
+  admSheet(`<h2>📷 Photos du catalogue</h2>
+    <div class="chips" style="flex-wrap:wrap">${Object.entries(SHOP_TYPES).map(([k, [i, l]]) => `<button type="button" data-ct="${k}" aria-pressed="${k === type}">${i} ${l}</button>`).join('')}</div>
+    <div class="muted">${done} / ${items.length} produits ont une photo. Touchez un produit pour prendre sa photo. Vraies photos seulement (jamais copiées d'internet).</div>
+    <div class="tiles">${items.map(x => { const k = nameKey(x.name), ph = map[k];
+      const h = x.category + ' · ' + x.kind !== last ? (last = x.category + ' · ' + x.kind, `<div style="grid-column:1/-1;font:700 14px var(--f-display);margin-top:6px">${esc(x.category)}${x.kind ? ' › ' + esc(x.kind) : ''}</div>`) : '';
+      return `${h}<button class="tile" data-cp="${esc(x.name)}"><span class="ini" style="background:#F6F4EE;overflow:hidden">${ph ? photoTag(PHOTO_URL + 'catalog/' + ph) : '<span style="font-size:26px">＋📷</span>'}</span>
+        <span class="tn">${esc(x.name)}</span><span class="muted" style="font-size:12px">${ph ? '✓ photo' : 'pas de photo'}</span></button>`; }).join('') || '<p class="empty">Pas de catalogue pour ce métier.</p>'}</div>
+    <button class="btn ghost" id="cancel">Fermer</button>`);
+  document.querySelectorAll('[data-ct]').forEach(b => b.onclick = () => adminCatalogPhotos(b.dataset.ct));
+  document.querySelectorAll('[data-cp]').forEach(b => b.onclick = async () => {
+    const name = b.dataset.cp, ph = map[nameKey(name)];
+    if (ph && !confirmPhotoChange(name)) return;
+    try {
+      const path = await uploadPhoto('catalog', type, name); if (!path) return;
+      await admRpc('admin_set_catalog_photo', { p_type: type, p_key: nameKey(name), p_path: path });
+      toast('Photo enregistrée ✓ ' + name); adminCatalogPhotos(type);
+    } catch (e) { toast(e.message, true); }
+  });
+}
+// Produit qui a déjà une photo : on demande avant de remplacer (2e toucher dans les 4 secondes).
+function confirmPhotoChange(name) {
+  if (S.phConfirm === name && Date.now() - S.phConfirmAt < 4000) { S.phConfirm = null; return true; }
+  S.phConfirm = name; S.phConfirmAt = Date.now(); toast('Touchez encore pour remplacer la photo de « ' + name + ' »'); return false;
+}
+
 /* --- ⚙️ Réglages --- */
 function admSettings() {
   const s = S.admSet || {};
@@ -1659,6 +1692,7 @@ function admSettings() {
       <label>Maximum par jour (tout le monde)<input id="st-max" type="number" inputmode="numeric" value="${esc(s.signup_day_max)}"></label>
       <label>« Inactive » après combien de jours sans activité ?<input id="st-idle" type="number" inputmode="numeric" value="${esc(s.inactive_days)}"></label></section>
     <button class="btn huge" id="st-ok">✓ Enregistrer les réglages</button>
+    <button class="btn" id="st-photos">📷 Photos du catalogue</button>
     <div class="row"><button class="btn ghost" id="st-journal">📜 Journal</button><button class="btn ghost" id="st-help">❓ Aide</button></div>
     <div class="row"><button class="btn ghost" id="st-lock">🔒 Verrouiller</button><button class="btn ghost" id="st-pin">🔢 Changer mon code</button></div>
     <button class="btn ghost" id="st-out">🚪 Se déconnecter</button>`;
@@ -1675,6 +1709,7 @@ function admSettings() {
     try { await admRpc('admin_set_settings', { p }); toast('Réglages enregistrés ✓'); adminView(); } catch (e) { toast(e.message, true); }
   };
   $('#st-journal').onclick = adminJournal;
+  $('#st-photos').onclick = () => adminCatalogPhotos();
   $('#st-help').onclick = adminHelp;
   $('#st-lock').onclick = () => lock();
   $('#st-pin').onclick = () => pinSetup(true);
@@ -2130,7 +2165,7 @@ const noBrand = n => { const w = String(n).split(/\s+/); return /^(samsung|tecno
 function prodTile(p) {
     const [bg, fg] = tileColor(p.category || p.name), inCart = S.cart.get(p.id), out = Number(p.stock_qty) <= 0;
     return `<button class="tile${inCart ? ' in' : ''}" data-add="${esc(p.id)}" ${out && !S.offline ? 'disabled' : ''} aria-label="${esc(p.name)}, ${esc(money(p.sell_price))}${inCart ? ', ' + esc(qty(inCart)) + ' dans le panier' : ''}">
-      ${artFor(p.name + ' ' + (p.kind || ''), p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(p.name + ' ' + (p.kind || ''), p.category)}</span>` : kindEmoji(p) ? `<span class="ini" style="background:#F6F4EE;font-size:30px" aria-hidden="true">${kindEmoji(p)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>`}
+      ${photoFor(p) ? `<span class="ini" style="background:#F6F4EE;overflow:hidden" aria-hidden="true">${photoTag(photoFor(p))}</span>` : artFor(p.name + ' ' + (p.kind || ''), p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(p.name + ' ' + (p.kind || ''), p.category)}</span>` : kindEmoji(p) ? `<span class="ini" style="background:#F6F4EE;font-size:30px" aria-hidden="true">${kindEmoji(p)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(p.name))}</span>`}
       <span class="tn">${esc(!S.q.trim() && S.nav && S.nav.sub && devType(S.cat) ? noBrand(p.name) : p.name)}</span>
       ${out ? '<span class="ts">Épuisé</span>' : `<span class="tp">${esc(fmtNum.format(p.sell_price))}</span>`}
       ${inCart ? `<span class="tq" aria-hidden="true">${esc(qty(inCart))}</span>` : ''}</button>`;
@@ -2144,7 +2179,7 @@ function famTile(p) {
   const min = Math.min(...l.map(q => Number(q.sell_price))), max = Math.max(...l.map(q => Number(q.sell_price)));
   const out = l.every(q => Number(q.stock_qty) <= 0);
   return `<button class="tile${n ? ' in' : ''}" data-famp="${esc(p.id)}" ${out && !S.offline ? 'disabled' : ''} aria-label="${esc(f)}, ${l.length} choix">
-    ${artFor(f + ' ' + (p.kind || ''), p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(f + ' ' + (p.kind || ''), p.category)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(f))}</span>`}
+    ${(() => { const ph = photoFor(l.find(q => q.photo) || p); return ph ? `<span class="ini" style="background:#F6F4EE;overflow:hidden" aria-hidden="true">${photoTag(ph)}</span>` : artFor(f + ' ' + (p.kind || ''), p.category) ? `<span class="ini" style="background:#F6F4EE" aria-hidden="true">${artFor(f + ' ' + (p.kind || ''), p.category)}</span>` : kindEmoji(p) ? `<span class="ini" style="background:#F6F4EE;font-size:30px" aria-hidden="true">${kindEmoji(p)}</span>` : `<span class="ini" style="background:${bg};color:${fg}" aria-hidden="true">${esc(initials(f))}</span>`; })()}
     <span class="tn">${esc(!S.q.trim() && S.nav && S.nav.sub && devType(S.cat) ? noBrand(f) : f)}</span><span class="muted" style="font-size:12px">${l.length} choix</span>
     ${out ? '<span class="ts">Épuisé</span>' : `<span class="tp">${min === max ? '' : 'dès '}${esc(fmtNum.format(min))}</span>`}
     ${n ? `<span class="tq" aria-hidden="true">${esc(qty(n))}</span>` : ''}</button>`;
@@ -3067,10 +3102,82 @@ function trackSheet(p) {
 }
 
 /* ===== Onglet Produits ===== */
+/* ===== 📷 Photos des produits =====
+   Photo de la boutique (prise par le propriétaire ou le gérant) > photo du catalogue (ajoutée par
+   l'administrateur, même nom de produit) > dessin > image du type > lettres. Réduites à ~30 Ko avant l'envoi. */
+const PHOTO_URL = SB_URL + '/storage/v1/object/public/';
+function photoFor(p) {
+  if (!p) return '';
+  if (p.photo) return PHOTO_URL + 'shop-photos/' + p.photo;
+  const m = S.catPhotos || {}, k = m[nameKey(p.name)] || (String(p.name).includes(' · ') ? m[nameKey(famName(p))] : null);
+  return k ? PHOTO_URL + 'catalog/' + k : '';
+}
+const photoTag = (url, css) => `<img src="${esc(url)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;${css || ''}" onerror="this.style.display='none'">`;
+async function loadCatPhotos() {
+  if (!S.shop) return;
+  const key = 'bg_catph_' + S.shop.type;
+  if (!S.catPhotos) { try { S.catPhotos = JSON.parse(storage.getItem(key) || '{}'); } catch (e) { S.catPhotos = {}; } }
+  if (S.offline) return;
+  try {
+    const { data, error } = await sb.from('catalog_photos').select('item_key,path').eq('shop_type', S.shop.type);
+    if (error) return;
+    S.catPhotos = {}; (data || []).forEach(r => { S.catPhotos[r.item_key] = r.path; });
+    try { storage.setItem(key, JSON.stringify(S.catPhotos)); } catch (e) {}
+  } catch (e) {}
+}
+// Photo prise ou choisie -> carré 400 x 400 (WebP, sinon JPEG), ~30 Ko.
+function pickPhoto() {
+  return new Promise(resolve => {
+    const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.setAttribute('capture', 'environment');
+    i.onchange = () => resolve(i.files && i.files[0] || null); i.click();
+  });
+}
+async function shrinkPhoto(file) {
+  const bmp = await createImageBitmap(file);
+  const c = document.createElement('canvas'); c.width = c.height = 400;
+  const s = Math.min(bmp.width, bmp.height), g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, 400, 400);
+  g.drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, 400, 400);
+  const blob = (t, q) => new Promise(r => c.toBlob(r, t, q));
+  for (const q of [0.72, 0.55, 0.4]) {
+    let b = await blob('image/webp', q);
+    if (!b || b.type !== 'image/webp') b = await blob('image/jpeg', q);
+    if (b && (b.size <= 60000 || q === 0.4)) return b;
+  }
+}
+async function uploadPhoto(bucket, folder, label) {
+  const f = await pickPhoto(); if (!f) return null;
+  toast('Envoi de la photo…');
+  const b = await shrinkPhoto(f);
+  if (!b || b.size > 290000) throw new Error('Photo trop lourde : réessayez.');
+  const ext = b.type === 'image/webp' ? 'webp' : 'jpg';
+  const rnd = [...crypto.getRandomValues(new Uint8Array(5))].map(x => x.toString(16).padStart(2, '0')).join('');
+  const path = `${folder}/${(slug(label) || 'photo').replace(/\./g, '-').slice(0, 60)}-${rnd}.${ext}`;
+  const { error } = await sb.storage.from(bucket).upload(path, b, { contentType: b.type, upsert: false, cacheControl: '31536000' });
+  if (error) throw new Error(/row-level|policy|Unauthorized|403/i.test(error.message || '') ? 'Envoi refusé (droits ou abonnement).' : /bucket|not found/i.test(error.message || '') ? 'Installez d\'abord la mise à jour 022 (photos) dans Supabase.' : cleanErr(error));
+  return path;
+}
+// Fiche produit : prendre / changer / retirer la photo de la boutique.
+async function productPhoto(p, remove) {
+  try {
+    let path = null;
+    if (!remove) { path = await uploadPhoto('shop-photos', S.shop.id, p.name); if (!path) return; }
+    const fam = String(p.name).includes(' · ') ? famList(p) : [p];
+    for (const q of fam) {
+      const { error } = await sb.rpc('set_product_photo', { p_product: q.id, p_photo: path });
+      if (error) throw new Error(/set_product_photo|function/.test(error.message || '') ? 'Installez d\'abord la mise à jour 022 (photos) dans Supabase.' : cleanErr(error));
+    }
+    toast(remove ? 'Photo retirée.' : 'Photo enregistrée ✓' + (fam.length > 1 ? ` (${fam.length} tailles / couleurs)` : ''));
+    await loadProducts(); closeSheet(); draw();
+  } catch (e) { toast(e.message, true); }
+}
+
 // Pas de dessin : l'image du type (🍪 Biscuits, 🍚 Riz…) plutôt que des lettres.
 const kindEmoji = p => { const k = kindOf(p); return k !== 'Autres' && KIND_IC[k] ? KIND_IC[k] : ''; };
 function prodIcon(p, size, extra) {
   const art = artFor(p.name + ' ' + (p.kind || ''), p.category), [bg, fg] = tileColor(p.category || p.name), st = `width:${size}px;height:${size}px;${extra || ''}`;
+  const ph = photoFor(p);
+  if (ph) return `<span class="pic" style="background:#F6F4EE;overflow:hidden;${st}" aria-hidden="true">${photoTag(ph)}</span>`;
   const em = !art && kindEmoji(p);
   return art ? `<span class="pic" style="background:#F6F4EE;${st}" aria-hidden="true">${art}</span>`
              : em ? `<span class="pic" style="background:#F6F4EE;font-size:${Math.round(size * 0.55)}px;${st}" aria-hidden="true">${em}</span>`
@@ -3866,6 +3973,7 @@ function productSheet(pid) {
       <button class="btn ghost" id="pa-adj" ${canWrite() ? '' : 'disabled'}><span>➖</span>Perte ou correction<small>cassé, volé, erreur…</small></button>
       <button class="btn ghost" id="pa-sell"><span>🛒</span>Vendre<small>ajouter au panier</small></button></div>`
       : '<button class="btn" id="pa-sell">🛒 Ajouter au panier</button>'}
+    ${mgr && canWrite() && !S.offline ? `<div class="row"><button class="btn ghost" id="pa-photo">📷 ${p.photo ? 'Changer la photo' : 'Ajouter une photo'}</button>${p.photo ? '<button class="btn ghost" id="pa-nophoto">Retirer la photo</button>' : ''}</div>` : ''}
     ${mgr && !isTracked(p) && devType(p.category) && p.unit === 'piece' && canWrite() && !S.offline ? '<button class="btn ghost" id="pa-track">🔢 Suivre chaque appareil par son IMEI</button>' : ''}
     ${mgr && p.barcode ? `<div class="muted" style="font-size:12.5px">Code ${esc(p.barcode)}</div>` : ''}
     <button class="btn ghost" id="cancel">Fermer</button></div></div>`;
@@ -3876,6 +3984,8 @@ function productSheet(pid) {
   const pe = $('#pa-exist'); if (pe) pe.onclick = () => arrival({ pid: p.id, existing: true });
   const pf = $('#pa-find'); if (pf) pf.onclick = findUnitSheet;
   const pt = $('#pa-track'); if (pt) pt.onclick = () => trackSheet(p);
+  const pp = $('#pa-photo'); if (pp) pp.onclick = () => productPhoto(p);
+  const pn = $('#pa-nophoto'); if (pn) pn.onclick = () => productPhoto(p, true);
   document.querySelectorAll('[data-unit-code]').forEach(b => b.onclick = () => unitSheet(b.dataset.unitCode));
   const r = $('#pa-recv'); if (r) r.onclick = () => openSheet('recv', pid);
   const e = $('#pa-edit'); if (e) e.onclick = () => openSheet('edit', pid);
