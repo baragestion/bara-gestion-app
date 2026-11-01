@@ -265,7 +265,7 @@ const UNITS = { piece:'pièce', sac:'sac', kilo:'kilo', litre:'litre', carton:'c
 const WHOLE = ['piece','sac','carton','barre','seau','paire'];
 const PAY = { cash:'Espèces', mobile_money:'Mobile money', other:'Autre' };
 const ROLES = { owner:'Propriétaire', manager:'Gérant', seller:'Vendeur' };
-const APP_VERSION = '2026-11-01c';   // à changer à chaque nouvelle version déposée sur GitHub
+const APP_VERSION = '2026-11-01d';   // à changer à chaque nouvelle version déposée sur GitHub
 const LOGIN_DOMAIN = 'bg-users.example.com';   // même valeur que dans la fonction « manage-team »
 const EXP = { rent:'Loyer', electricity:'Électricité', transport:'Transport', other:'Autre' };
 const dt = s => new Date(s).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -3103,7 +3103,8 @@ const PHOTO_URL = SB_URL + '/storage/v1/object/public/';
 function photoFor(p) {
   if (!p) return '';
   if (p.photo) return PHOTO_URL + 'shop-photos/' + p.photo;
-  const m = S.catPhotos || {}, k = m[nameKey(p.name)] || (String(p.name).includes(' · ') ? m[nameKey(famName(p))] : null);
+  const m = S.catPhotos || {}, k = m[nameKey(p.name)] || (String(p.name).includes(' · ') ? m[nameKey(famName(p))] : null)
+    || (S.catKindPhotos || {})[kindOf(p)];   // sinon : la photo d'un produit du même type (ex. une photo de riz pour tous les riz)
   return k ? PHOTO_URL + 'catalog/' + k : '';
 }
 const photoTag = (url, css) => `<img src="${esc(url)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;${css || ''}" onerror="this.style.display='none'">`;
@@ -3111,13 +3112,19 @@ async function loadCatPhotos() {
   if (!S.shop) return;
   const key = 'bg_catph_' + S.shop.type;
   if (!S.catPhotos) { try { S.catPhotos = JSON.parse(storage.getItem(key) || '{}'); } catch (e) { S.catPhotos = {}; } }
-  if (S.offline) return;
+  if (S.offline) return catKindPhotos();
   try {
     const { data, error } = await sb.from('catalog_photos').select('item_key,path').eq('shop_type', S.shop.type);
     if (error) return;
     S.catPhotos = {}; (data || []).forEach(r => { S.catPhotos[r.item_key] = r.path; });
     try { storage.setItem(key, JSON.stringify(S.catPhotos)); } catch (e) {}
   } catch (e) {}
+  catKindPhotos();
+}
+// Une photo par type (Riz, Biscuits…) : celle du 1er produit du catalogue de ce type qui a une photo.
+function catKindPhotos() {
+  S.catKindPhotos = {};
+  catItems().forEach(x => { const ph = (S.catPhotos || {})[nameKey(x.name)]; if (ph && x.kind && !S.catKindPhotos[x.kind]) S.catKindPhotos[x.kind] = ph; });
 }
 // Photo prise ou choisie -> carré 400 x 400 (WebP, sinon JPEG), ~30 Ko.
 function pickPhoto() {
