@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ma vitrine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;600;700&display=swap">
+<style>
+/* Espace du commerçant : un gros bouton « Ajouter un produit », la liste en photos, une fiche plein écran. */
+:root{
+  --bg:#F4F1EC; --card:#FFFFFF; --ink:#1D1A2B; --muted:#6A6475; --line:#E3DDD3; --chip:#ECE6DC;
+  --indigo:#2C3C8F; --ochre:#D58A26; --red:#B23A2E; --wa:#1C8C4C; --on:#FFFFFF;
+  --f-display:'Bricolage Grotesque','Arial Narrow',Arial,sans-serif; --f-body:'Figtree','Segoe UI',Arial,sans-serif;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){:root{--bg:#15131E;--card:#201D2C;--ink:#F2EEE6;--muted:#ABA4B6;--line:#332F40;--chip:#2A2638;
+  --indigo:#8E9BEA;--ochre:#E9A74C;--red:#E07062;--wa:#25A55C;color-scheme:dark}}
+*{box-sizing:border-box} [hidden]{display:none!important} img{max-width:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:17px;line-height:1.4}
+.wrap{max-width:720px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.stripes{height:12px;background:repeating-linear-gradient(90deg,var(--indigo) 0 22px,var(--ochre) 22px 30px,var(--red) 30px 44px,var(--bg) 44px 48px,var(--indigo) 48px 56px,var(--line) 56px 60px)}
+h1,h2{font-family:var(--f-display);margin:0;text-wrap:balance}
+h1{font-size:32px;font-weight:800;line-height:1.05}
+h2{font-size:24px;font-weight:700}
+.muted{color:var(--muted)} .small{font-size:14px}
+.stack{display:flex;flex-direction:column;gap:14px}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:58px;padding:0 20px;border-radius:16px;border:0;
+  font:700 18px var(--f-body);cursor:pointer;text-decoration:none;width:100%;color:var(--ink);background:var(--chip)}
+.btn-main{background:var(--wa);color:var(--on);font-size:20px;min-height:66px}
+.btn-line{background:transparent;border:2px solid var(--line)}
+.btn-danger{background:transparent;color:var(--red);border:2px solid var(--red)}
+.btn:disabled{opacity:.6}
+.btn:focus-visible,input:focus-visible,.chip:focus-visible,.tile:focus-visible{outline:3px solid var(--ochre);outline-offset:2px}
+label.f{display:flex;flex-direction:column;gap:6px;font-weight:700;font-size:16px}
+input[type=text],input[type=tel],input[type=password],input[inputmode]{font:400 19px var(--f-body);padding:14px;border-radius:14px;
+  border:2px solid var(--line);background:var(--card);color:var(--ink);width:100%}
+.err{background:color-mix(in srgb,var(--red) 14%,var(--card));color:var(--red);padding:12px 14px;border-radius:12px;font-weight:600}
+.top{padding-block:22px 16px;display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:10px} .row>*{flex:1;min-width:0}
+.status{font-size:14px;font-weight:700;padding:8px 12px;border-radius:12px;background:var(--chip)}
+.status.bad{background:color-mix(in srgb,var(--red) 16%,var(--card));color:var(--red)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding-block:16px 40px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;text-align:left;padding:0;cursor:pointer;
+  font:inherit;color:inherit;display:flex;flex-direction:column}
+.tile .ph{aspect-ratio:4/5;background:var(--chip);display:grid;place-items:center;font-size:40px;position:relative;max-width:100%}
+.tile .ph img{width:100%;height:100%;object-fit:cover}
+.tile .t{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile b{font-size:16px;line-height:1.25}
+.tile .p{font-family:var(--f-display);font-weight:800;font-size:19px}
+.tag-out{position:absolute;top:8px;left:8px;background:var(--ink);color:var(--bg);font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px}
+.sheet{position:fixed;inset:0;z-index:20;background:var(--bg);overflow-y:auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+.sheet-head{display:flex;align-items:center;gap:12px;padding-block:14px}
+.x{width:48px;height:48px;border-radius:50%;border:0;background:var(--chip);color:var(--ink);font-size:24px;cursor:pointer;flex:none}
+.photo{display:grid;place-items:center;aspect-ratio:4/5;max-width:340px;width:100%;margin:0 auto;border-radius:20px;border:3px dashed var(--line);
+  background:var(--card);cursor:pointer;overflow:hidden;position:relative;text-align:center;color:var(--muted);font-weight:700}
+.photo img{width:100%;height:100%;object-fit:cover}
+.photo .ic{font-size:54px;display:block}
+.photo input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.photo .chg{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;padding:6px 14px;border-radius:999px;font-size:14px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:0;background:var(--chip);color:var(--ink);font:600 16px var(--f-body);padding:11px 16px;border-radius:999px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border:2px solid var(--line);border-radius:14px;padding:14px;font-weight:700;cursor:pointer}
+.switch input{width:26px;height:26px;accent-color:var(--wa)}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;background:var(--ink);color:var(--bg);
+  padding:12px 18px;border-radius:14px;font-weight:700;max-width:calc(100% - 32px)}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+</style>
+</head>
+<body>
+<div class="stripes" aria-hidden="true"></div>
+<div id="app" class="wrap"><p class="muted" style="padding:40px 0">Chargement…</p></div>
+<div id="sheet" class="sheet" hidden></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+/* Espace du commerçant pour sa vitrine. Clé publique seulement : la sécurité est dans la base (migration 024). */
+const SB_URL = 'https://uqnucmgsgkwalxodqmjr.supabase.co';
+const SB_KEY = 'sb_publishable_3vrJsQkSN2QlL_MMwBPGgQ_rC-IvhNo';
+const LOGIN_DOMAIN = 'vitrine-users.example.com';
+const mem = {};
+const storage = {
+  getItem: k => { try { return localStorage.getItem(k); } catch (e) { return mem[k] ?? null; } },
+  setItem: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { mem[k] = v; } },
+  removeItem: k => { try { localStorage.removeItem(k); } catch (e) { delete mem[k]; } },
+};
+const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { storage, storageKey: 'bara-vitrine', persistSession: true, autoRefreshToken: true } });
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const F = n => Number(n).toLocaleString('fr-FR').replace(/ | /g, ' ') + ' F';
+const photoUrl = p => SB_URL + '/storage/v1/object/public/vitrine/' + p.split('/').map(encodeURIComponent).join('/');
+const pageUrl = slug => new URL('vitrine.html?b=' + slug, location.href).href;
+let V = null;   // ma vitrine
+
+function toast(m, ms = 2600) { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, ms); }
+function niceErr(e) {
+  const m = String((e && e.message) || e || '');
+  if (/invalid login|credentials/i.test(m)) return 'Numéro ou mot de passe incorrect.';
+  if (/fetch|network|failed to/i.test(m)) return 'Pas de connexion internet. Réessayez.';
+  if (/vitrine_|function|does not exist/i.test(m)) return 'Le service n\'est pas encore installé. Prévenez Monsieur Bara.';
+  return m.replace(/^.*?:\s*/, '') || 'Erreur. Réessayez.';
+}
+function phoneLogin(raw) {
+  let d = String(raw || '').replace(/\D/g, '').replace(/^00/, '');
+  if (d.length === 8) d = '226' + d;
+  return d;
+}
+
+/* ---------- Connexion / inscription ---------- */
+function drawWelcome(err) {
+  $('#app').innerHTML = `<div class="top stack" style="padding-top:36px">
+    <h1>Ma vitrine</h1>
+    <p class="muted">Votre boutique sur internet. Vos clients voient vos produits et commandent sur WhatsApp.</p>
+    ${err ? `<div class="err">${esc(err)}</div>` : ''}
+    <button class="btn btn-main" id="go-login">Se connecter</button>
+    <button class="btn btn-line" id="go-signup">Créer ma vitrine (gratuit 30 jours)</button>
+  </div>`;
+  $('#go-login').onclick = () => drawLogin();
+  $('#go-signup').onclick = () => drawSignup();
+}
+function drawLogin(err) {
+  $('#app').innerHTML = `<form class="top stack" id="f" style="padding-top:28px" novalidate>
+    <h1>Se connecter</h1>
+    ${err ? `<div class="err">${esc(err)}</div>` : ''}
+    <label class="f">📞 Votre numéro<input type="tel" id="l-phone" autocomplete="username" placeholder="74 35 59 06" required></label>
+    <label class="f">🔒 Mot de passe<input type="password" id="l-pass" autocomplete="current-password" required></label>
+    <button class="btn btn-main" id="l-go">Entrer</button>
+    <button type="button" class="btn btn-line" id="back">Retour</button>
+  </form>`;
+  $('#back').onclick = () => drawWelcome();
+  $('#f').onsubmit = async e => {
+    e.preventDefault();
+    const login = phoneLogin($('#l-phone').value), pass = $('#l-pass').value;
+    if (login.length < 10) return drawLogin('Tapez votre numéro de téléphone.');
+    $('#l-go').disabled = true; $('#l-go').textContent = 'Connexion…';
+    const { error } = await sb.auth.signInWithPassword({ email: login + '@' + LOGIN_DOMAIN, password: pass });
+    if (error) return drawLogin(niceErr(error));
+    start();
+  };
+}
+function drawSignup(err, keep = {}) {
+  $('#app').innerHTML = `<form class="top stack" id="f" style="padding-top:28px" novalidate>
+    <h1>Créer ma vitrine</h1>
+    <p class="muted small">30 jours gratuits. Ensuite, Monsieur Bara vous dit le prix.</p>
+    ${err ? `<div class="err">${esc(err)}</div>` : ''}
+    <label class="f">🏪 Nom de la boutique<input type="text" id="s-nom" maxlength="60" value="${esc(keep.nom)}" placeholder="Abdoulaye Shop" required></label>
+    <label class="f">📞 Numéro WhatsApp (les commandes arrivent ici)<input type="tel" id="s-phone" value="${esc(keep.phone)}" placeholder="74 35 59 06" required></label>
+    <label class="f">🔒 Choisissez un mot de passe (6 caractères ou plus)<input type="password" id="s-pass" autocomplete="new-password" required></label>
+    <label class="f">🔒 Retapez le mot de passe<input type="password" id="s-pass2" autocomplete="new-password" required></label>
+    <div class="hp" aria-hidden="true"><input type="text" id="s-web" tabindex="-1" autocomplete="off"></div>
+    <button class="btn btn-main" id="s-go">Créer ma vitrine</button>
+    <button type="button" class="btn btn-line" id="back">Retour</button>
+  </form>`;
+  $('#back').onclick = () => drawWelcome();
+  $('#f').onsubmit = async e => {
+    e.preventDefault();
+    const nom = $('#s-nom').value.trim(), phone = $('#s-phone').value.trim(), pass = $('#s-pass').value;
+    const k = { nom, phone };
+    if (nom.length < 2) return drawSignup('Écrivez le nom de la boutique.', k);
+    if (phoneLogin(phone).length < 10) return drawSignup('Tapez le numéro WhatsApp.', k);
+    if (pass.length < 6) return drawSignup('Le mot de passe doit avoir au moins 6 caractères.', k);
+    if (pass !== $('#s-pass2').value) return drawSignup('Les deux mots de passe ne sont pas pareils.', k);
+    $('#s-go').disabled = true; $('#s-go').textContent = 'Création…';
+    try {
+      const r = await fetch(SB_URL + '/functions/v1/vitrine-signup', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SB_KEY },
+        body: JSON.stringify({ nom, phone, password: pass, website: $('#s-web').value }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return drawSignup(j.error || (r.status === 404 ? 'Le service n\'est pas encore installé. Prévenez Monsieur Bara.' : 'Création impossible. Réessayez.'), k);
+      const { error } = await sb.auth.signInWithPassword({ email: j.login + '@' + LOGIN_DOMAIN, password: pass });
+      if (error) return drawLogin('Vitrine créée. Connectez-vous avec votre numéro et votre mot de passe.');
+      toast('Vitrine créée 🎉'); start();
+    } catch (e2) { drawSignup(niceErr(e2), k); }
+  };
+}
+
+/* ---------- Ma vitrine ---------- */
+async function start() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return drawWelcome();
+  const { data, error } = await sb.rpc('vitrine_moi');
+  if (error) {
+    if (/aucune vitrine/i.test(error.message)) { await sb.auth.signOut(); return drawWelcome('Ce compte n\'a pas de vitrine.'); }
+    $('#app').innerHTML = `<div class="top stack"><div class="err">${esc(niceErr(error))}</div><button class="btn" onclick="start()">Réessayer</button></div>`;
+    return;
+  }
+  V = data; drawHome();
+}
+function daysLeft() { return Math.ceil((new Date(V.jusqu_au + 'T23:59:59') - new Date()) / 864e5); }
+function drawHome() {
+  const d = daysLeft(), off = !V.actif || d < 0;
+  const link = pageUrl(V.slug);
+  $('#app').innerHTML = `
+  <div class="top">
+    <h1>${esc(V.nom)}</h1>
+    <div class="status ${off ? 'bad' : ''}">${off ? '⏸️ Votre page est en pause. Contactez Monsieur Bara.'
+      : d <= 5 ? `⚠️ Page active encore ${d} jour${d > 1 ? 's' : ''}. Pensez à payer.` : `✅ Page en ligne jusqu'au ${new Date(V.jusqu_au + 'T12:00').toLocaleDateString('fr-FR')}`}</div>
+    <button class="btn btn-main" id="add">📷 Ajouter un produit</button>
+    <div class="row">
+      <a class="btn btn-line" href="${esc(link)}" target="_blank" rel="noopener">👀 Voir ma page</a>
+      <a class="btn btn-line" href="${esc('https://wa.me/?text=' + encodeURIComponent('Voici notre boutique en ligne : ' + V.nom + '\n' + link))}" target="_blank" rel="noopener">📤 Partager</a>
+    </div>
+  </div>
+  <h2>Mes produits <span class="muted small">(${V.produits.length})</span></h2>
+  ${V.produits.length ? '' : '<p class="muted">Aucun produit. Touchez « Ajouter un produit » pour commencer.</p>'}
+  <div class="grid">${V.produits.map((p, i) => `
+    <button class="tile" data-i="${i}">
+      <div class="ph">${p.photo ? `<img src="${esc(photoUrl(p.photo))}" alt="" loading="lazy">` : '📦'}${p.epuise ? '<span class="tag-out">Épuisé</span>' : ''}</div>
+      <div class="t"><b>${esc(p.nom)}</b><span class="p">${p.prix == null ? '<span class="muted small">Prix sur demande</span>' : F(p.prix)}</span></div>
+    </button>`).join('')}</div>
+  <div class="stack" style="padding-bottom:40px">
+    <button class="btn btn-line" id="infos">⚙️ Infos de la boutique</button>
+    <button class="btn btn-line" id="out">🚪 Se déconnecter</button>
+  </div>`;
+  $('#add').onclick = () => editProduct(null);
+  $('#infos').onclick = () => editInfos();
+  $('#out').onclick = async () => { await sb.auth.signOut({ scope: 'local' }).catch(() => {}); V = null; drawWelcome(); };
+  document.querySelectorAll('.tile').forEach(b => b.onclick = () => editProduct(V.produits[+b.dataset.i]));
+}
+function openSheet(html) { const s = $('#sheet'); s.innerHTML = html; s.hidden = false; s.scrollTop = 0; document.body.style.overflow = 'hidden'; }
+function closeSheet() { $('#sheet').hidden = true; $('#sheet').innerHTML = ''; document.body.style.overflow = ''; }
+
+/* Photo : coupée en 4:5, réduite (560 × 700), WebP ou JPEG, environ 50 à 120 Ko. */
+async function shrinkPhoto(file) {
+  const bmp = await createImageBitmap(file);
+  const W = 560, H = 700, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const r = W / H; let sw = bmp.width, sh = bmp.height;
+  if (sw / sh > r) sw = sh * r; else sh = sw / r;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.drawImage(bmp, (bmp.width - sw) / 2, (bmp.height - sh) / 2, sw, sh, 0, 0, W, H);
+  const blob = (t, q) => new Promise(res => c.toBlob(res, t, q));
+  for (const q of [0.75, 0.6, 0.45]) {
+    let b = await blob('image/webp', q);
+    if (!b || b.type !== 'image/webp') b = await blob('image/jpeg', q);
+    if (b && (b.size <= 150000 || q === 0.45)) return b;
+  }
+}
+function slugify(s) { return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'photo'; }
+async function uploadPhoto(blob, nom) {
+  const ext = blob.type === 'image/webp' ? 'webp' : 'jpg';
+  const rnd = [...crypto.getRandomValues(new Uint8Array(4))].map(x => x.toString(16).padStart(2, '0')).join('');
+  const path = `${V.id}/${slugify(nom)}-${rnd}.${ext}`;
+  const { error } = await sb.storage.from('vitrine').upload(path, blob, { contentType: blob.type, upsert: false, cacheControl: '31536000' });
+  if (error) throw new Error(/policy|row-level|403|Unauthorized/i.test(error.message || '') ? 'Envoi de la photo refusé.' : /bucket|not found/i.test(error.message || '') ? 'Le service photo n\'est pas installé. Prévenez Monsieur Bara.' : error.message);
+  return path;
+}
+
+function editProduct(p) {
+  const cats = [...new Set(V.produits.map(x => x.cat).filter(Boolean))];
+  const st = { blob: null, cat: p ? p.cat : (cats[0] || ''), free: p ? p.prix == null : false, confirmDel: false };
+  const draw = (err) => {
+    const prev = st.blob ? URL.createObjectURL(st.blob) : p && p.photo ? photoUrl(p.photo) : null;
+    openSheet(`<div class="wrap stack">
+      <div class="sheet-head"><button class="x" id="x" aria-label="Fermer">✕</button><h2>${p ? 'Modifier le produit' : 'Nouveau produit'}</h2></div>
+      ${err ? `<div class="err">${esc(err)}</div>` : ''}
+      <label class="photo" id="ph">${prev ? `<img src="${esc(prev)}" alt=""><span class="chg">📷 Changer la photo</span>`
+        : '<span><span class="ic">📷</span>Toucher pour mettre<br>une photo</span>'}<input type="file" accept="image/*" id="file"></label>
+      <label class="f">Nom du produit<input type="text" id="p-nom" maxlength="80" value="${esc(st.nom ?? (p ? p.nom : ''))}" placeholder="Ex. Baskets rouge et blanc"></label>
+      <label class="f" ${st.free ? 'hidden' : ''}>Prix (F CFA)<input inputmode="numeric" id="p-prix" value="${esc(st.prix ?? (p && p.prix != null ? p.prix : ''))}" placeholder="Ex. 22000"></label>
+      <label class="switch">Prix sur demande<input type="checkbox" id="p-free" ${st.free ? 'checked' : ''}></label>
+      <div class="f">Catégorie
+        <div class="chips">${cats.map(c => `<button type="button" class="chip" data-c="${esc(c)}" aria-pressed="${c === st.cat}">${esc(c)}</button>`).join('')}
+          <button type="button" class="chip" id="newcat" aria-pressed="${!!st.cat && !cats.includes(st.cat)}">＋ Nouvelle</button></div>
+        <input type="text" id="p-cat" maxlength="30" placeholder="Ex. Baskets, Pantalons, Maillots" value="${esc(cats.includes(st.cat) ? '' : st.cat)}" ${st.cat && cats.includes(st.cat) ? 'hidden' : ''}>
+      </div>
+      <label class="f">Détail (facultatif)<input type="text" id="p-det" maxlength="120" value="${esc(st.det ?? (p ? p.details : ''))}" placeholder="Ex. Pointures 40 à 45"></label>
+      ${p ? `<label class="switch">Épuisé pour le moment<input type="checkbox" id="p-out" ${(st.out ?? p.epuise) ? 'checked' : ''}></label>` : ''}
+      <button class="btn btn-main" id="save">✅ Enregistrer</button>
+      ${p ? `<button class="btn btn-danger" id="del">${st.confirmDel ? '⚠️ Toucher encore pour supprimer' : '🗑️ Supprimer ce produit'}</button>` : ''}
+    </div>`);
+    const keep = () => { st.nom = $('#p-nom').value; st.prix = $('#p-prix').value; st.det = $('#p-det').value; if ($('#p-out')) st.out = $('#p-out').checked;
+      if (!$('#p-cat').hidden) st.cat = $('#p-cat').value.trim(); };
+    $('#x').onclick = closeSheet;
+    $('#file').onchange = async e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return;
+      keep(); try { st.blob = await shrinkPhoto(f); draw(); } catch (e2) { draw('Photo illisible. Essayez une autre.'); } };
+    $('#p-free').onchange = () => { keep(); st.free = $('#p-free').checked; draw(); };
+    document.querySelectorAll('.chip[data-c]').forEach(b => b.onclick = () => { keep(); st.cat = b.dataset.c; draw(); });
+    $('#newcat').onclick = () => { keep(); st.cat = ''; draw(); setTimeout(() => $('#p-cat').focus(), 50); };
+    if ($('#del')) $('#del').onclick = async () => {
+      if (!st.confirmDel) { keep(); st.confirmDel = true; return draw(); }
+      $('#del').disabled = true;
+      const { error } = await sb.rpc('vitrine_produit_suppr', { p_id: p.id });
+      if (error) return draw(niceErr(error));
+      closeSheet(); toast('Produit supprimé'); start();
+    };
+    $('#save').onclick = async () => {
+      keep();
+      const nom = (st.nom || '').trim(); const prix = st.free ? null : parseInt(String(st.prix || '').replace(/\D/g, ''), 10);
+      if (!nom) return draw('Écrivez le nom du produit.');
+      if (!st.free && !(prix >= 0)) return draw('Écrivez le prix, ou choisissez « Prix sur demande ».');
+      if (!p && !st.blob) return draw('Mettez une photo : c\'est ce que les clients regardent en premier.');
+      const b = $('#save'); b.disabled = true; b.textContent = st.blob ? 'Envoi de la photo…' : 'Enregistrement…';
+      try {
+        const photo = st.blob ? await uploadPhoto(st.blob, nom) : (p ? p.photo : null);
+        const args = { p_nom: nom, p_cat: st.cat || '', p_prix: prix, p_details: (st.det || '').trim(), p_photo: photo };
+        const { error } = p ? await sb.rpc('vitrine_produit_maj', { p_id: p.id, ...args, p_epuise: !!st.out })
+                            : await sb.rpc('vitrine_produit_ajout', args);
+        if (error) throw error;
+        closeSheet(); toast(p ? 'Produit modifié ✅' : 'Produit ajouté ✅'); start();
+      } catch (e) { draw(niceErr(e)); }
+    };
+  };
+  draw();
+}
+
+function editInfos() {
+  openSheet(`<form class="wrap stack" id="fi" novalidate>
+    <div class="sheet-head"><button type="button" class="x" id="x" aria-label="Fermer">✕</button><h2>Infos de la boutique</h2></div>
+    <div id="ierr"></div>
+    <label class="f">🏪 Nom<input type="text" id="i-nom" maxlength="60" value="${esc(V.nom)}"></label>
+    <label class="f">✍️ Phrase d'accueil<input type="text" id="i-slo" maxlength="140" value="${esc(V.slogan)}" placeholder="Ex. Baskets et jeans tendance à petit prix"></label>
+    <label class="f">📞 Numéro WhatsApp<input type="tel" id="i-wa" value="${esc(V.whatsapp)}"></label>
+    <label class="f">🏙️ Ville<input type="text" id="i-ville" maxlength="80" value="${esc(V.ville)}" placeholder="Ex. Bèguédo"></label>
+    <label class="f">📍 Adresse (quartier + repère)<input type="text" id="i-adr" maxlength="140" value="${esc(V.adresse)}" placeholder="Ex. Près du marché, à côté de la pharmacie"></label>
+    <label class="f">🕗 Horaires<input type="text" id="i-hor" maxlength="120" value="${esc(V.horaires)}" placeholder="Ex. Tous les jours, 8h à 20h"></label>
+    <button class="btn btn-main" id="i-go">✅ Enregistrer</button>
+    <p class="muted small">Adresse de votre page : <b style="user-select:all;word-break:break-all">${esc(pageUrl(V.slug))}</b></p>
+  </form>`);
+  $('#x').onclick = closeSheet;
+  $('#fi').onsubmit = async e => {
+    e.preventDefault(); $('#i-go').disabled = true;
+    const { error } = await sb.rpc('vitrine_maj', { p_nom: $('#i-nom').value, p_slogan: $('#i-slo').value, p_ville: $('#i-ville').value,
+      p_adresse: $('#i-adr').value, p_whatsapp: $('#i-wa').value, p_horaires: $('#i-hor').value });
+    if (error) { $('#ierr').innerHTML = `<div class="err">${esc(niceErr(error))}</div>`; $('#i-go').disabled = false; return; }
+    closeSheet(); toast('Infos enregistrées ✅'); start();
+  };
+}
+
+start();
+</script>
+</body>
+</html>
