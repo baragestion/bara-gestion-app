@@ -213,10 +213,12 @@ function drawHome() {
     </button>`).join('')}</div>
   <div class="stack" style="padding-bottom:40px">
     <button class="btn btn-line" id="infos">⚙️ Infos de la boutique</button>
+    <label class="btn btn-line" style="position:relative">📥 Importer des produits (fichier)<input type="file" id="imp" accept=".json,application/json" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"></label>
     <button class="btn btn-line" id="out">🚪 Se déconnecter</button>
   </div>`;
   $('#add').onclick = () => editProduct(null);
   $('#infos').onclick = () => editInfos();
+  $('#imp').onchange = e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importFile(f); };
   $('#out').onclick = async () => { await sb.auth.signOut({ scope: 'local' }).catch(() => {}); V = null; drawWelcome(); };
   document.querySelectorAll('.tile').forEach(b => b.onclick = () => editProduct(V.produits[+b.dataset.i]));
 }
@@ -246,6 +248,36 @@ async function uploadPhoto(blob, nom) {
   const { error } = await sb.storage.from('vitrine').upload(path, blob, { contentType: blob.type, upsert: false, cacheControl: '31536000' });
   if (error) throw new Error(/policy|row-level|403|Unauthorized/i.test(error.message || '') ? 'Envoi de la photo refusé.' : /bucket|not found/i.test(error.message || '') ? 'Le service photo n\'est pas installé. Prévenez Monsieur Bara.' : error.message);
   return path;
+}
+
+/* Import d'un fichier préparé par Monsieur Bara : [{nom, cat, prix, details, photo: "data:image/..."}]. */
+async function importFile(file) {
+  let list;
+  try { list = JSON.parse(await file.text()); if (!Array.isArray(list)) throw 0; }
+  catch (e) { return toast('Ce fichier n\'est pas un fichier de produits.', 4000); }
+  list = list.filter(x => x && typeof x.nom === 'string' && x.nom.trim()).slice(0, 100);
+  const have = new Set(V.produits.map(p => p.nom.trim().toLowerCase()));
+  const todo = list.filter(x => !have.has(x.nom.trim().toLowerCase()));
+  if (!todo.length) return toast('Ces produits sont déjà dans votre vitrine.', 4000);
+  openSheet(`<div class="wrap stack" style="padding-top:40px"><h2>Import en cours…</h2>
+    <p class="muted">Ne fermez pas la page.</p><div class="status" id="prog">0 / ${todo.length}</div></div>`);
+  let ok = 0, ko = 0;
+  for (const x of todo) {
+    try {
+      let photo = null;
+      if (typeof x.photo === 'string' && x.photo.startsWith('data:image/')) {
+        const blob = await (await fetch(x.photo)).blob();
+        photo = await uploadPhoto(await shrinkPhoto(blob), x.nom);
+      }
+      const prix = x.prix == null || x.prix === '' ? null : Math.max(0, parseInt(x.prix, 10) || 0);
+      const { error } = await sb.rpc('vitrine_produit_ajout', { p_nom: x.nom.trim().slice(0, 80), p_cat: String(x.cat || '').slice(0, 30),
+        p_prix: prix, p_details: String(x.details || '').slice(0, 120), p_photo: photo });
+      if (error) throw error;
+      ok++;
+    } catch (e) { ko++; }
+    $('#prog').textContent = `${ok + ko} / ${todo.length}`;
+  }
+  closeSheet(); toast(ko ? `${ok} produits ajoutés, ${ko} refusés.` : `${ok} produits ajoutés ✅`, 5000); start();
 }
 
 function editProduct(p) {
@@ -278,7 +310,7 @@ function editProduct(p) {
       keep(); try { st.blob = await shrinkPhoto(f); draw(); } catch (e2) { draw('Photo illisible. Essayez une autre.'); } };
     $('#p-free').onchange = () => { keep(); st.free = $('#p-free').checked; draw(); };
     document.querySelectorAll('.chip[data-c]').forEach(b => b.onclick = () => { keep(); st.cat = b.dataset.c; draw(); });
-    $('#newcat').onclick = () => { keep(); st.cat = ''; draw(); setTimeout(() => $('#p-cat').focus(), 50); };
+    $('#newcat').onclick = () => { keep(); st.cat = ''; draw(); setTimeout(() => { const i = $('#p-cat'); if (i) i.focus(); }, 50); };
     if ($('#del')) $('#del').onclick = async () => {
       if (!st.confirmDel) { keep(); st.confirmDel = true; return draw(); }
       $('#del').disabled = true;
